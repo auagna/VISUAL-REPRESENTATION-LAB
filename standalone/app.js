@@ -4,6 +4,7 @@
 
   const STORAGE_KEY = "vrl-v02-projects";
   const MODULE_KEY = "vrl-v02-custom-modules";
+  const AI_SETTINGS_KEY = "vrl-v02-ai-routing";
   const appEl = document.getElementById("app");
   const toastEl = document.getElementById("toast");
 
@@ -14,30 +15,44 @@
   const pathGet = (object, path) => path.split(".").reduce((value, part) => value?.[part], object);
   const pathSet = (object, path, value) => { const parts = path.split("."); const final = parts.pop(); const target = parts.reduce((item, part) => item[part], object); target[final] = value; };
   const attr = (value, mode = "controlled", source = "system", strength = 60) => ({ value, enabled: true, mode, source, strength });
-  const modeLabel = (mode) => mode === "locked" ? "LOCKED" : mode === "controlled" ? "CONTROLLED" : "FREE";
+  const modeLabel = (mode) => mode === "locked" ? "잠금" : mode === "controlled" ? "제어" : "자유";
   const intensity = (n) => n <= 20 ? "subtle" : n <= 40 ? "light" : n <= 60 ? "clear" : n <= 80 ? "strong" : "dominant";
   const now = () => new Date().toISOString();
   function toast(message) { toastEl.textContent = message; toastEl.classList.add("show"); clearTimeout(toast._timer); toast._timer = setTimeout(() => toastEl.classList.remove("show"), 2200); }
+  const KO_UI = {
+    "Selection mask editor": "선택 마스크 편집기", "BRUSH": "브러시", "ERASER": "지우개", "CLEAR": "지우기", "MASK VISIBLE": "마스크 표시", "MASK HIDDEN": "마스크 숨김", "＋ NEW REGION": "＋ 새 영역", "UPDATE REGION MASK": "영역 마스크 업데이트", "CREATE REGION": "영역 만들기", "Regions": "편집 영역", "Active region": "활성 영역", "Region operation": "영역 작업", "Operation": "작업", "Instruction": "지시문", "Material": "재료", "Color": "색상", "Form": "형태", "Texture": "텍스처", "Region reference image": "영역 레퍼런스 이미지", "Preservation": "보존 설정", "Local compiler": "지역 컴파일러", "GENERATE REGION EDIT": "영역 편집 생성", "One Factor At A Time": "단일 변수 실험", "Variable": "변수", "Values": "값", "RUN OFAT SERIES": "단일 변수 실험 실행", "Coordinated divergence": "조율된 대안 변화", "Number of alternatives": "대안 개수", "Variation scope": "변화 범위", "GENERATE ALTERNATIVES": "대안 생성", "Image provider": "이미지 제공자", "ACTIVE PROVIDER": "활성 제공자", "MODE": "모드", "GENERATE SNAPSHOT": "스냅샷 생성", "Deterministic compiler": "결정론적 컴파일러", "Module port contract": "모듈 입출력 계약", "Debug node / state": "디버그 노드 / 상태", "DELETE": "삭제", "APPLY": "적용", "ADVANCED": "고급 설정", "EVALUATION": "평가", "LOAD": "불러오기", "CLEAR SELECTION": "선택 해제", "State difference": "상태 차이", "Compiler section difference": "컴파일러 섹션 차이", "Generation / experiment results": "생성 / 실험 결과", "UNCHANGED": "변경 없음", "IDENTICAL PROMPT": "동일한 프롬프트", "ONE FACTOR": "단일 변수", "BASELINE": "기준 상태", "targetFollowed": "목표 속성 반영", "preserved": "기타 속성 보존", "controllability": "전반적 제어성"
+  };
+  const FAILURE_KO = { "Variable definition failure": "변수 정의 실패", "Reference analysis failure": "레퍼런스 분석 실패", "Representation merge failure": "표현 병합 실패", "Prompt compiler failure": "프롬프트 컴파일러 실패", "Generator unpredictability": "생성기 예측 불가능성", "Preservation failure": "보존 실패", "Unknown": "알 수 없음", "Failure cause…": "실패 원인…" };
+  function applyKoreanUi(root) {
+    if (!root?.querySelectorAll) return;
+    root.querySelectorAll("h3,label,summary,b,button,.eyebrow,.diff-item,.badge").forEach((element) => {
+      if (element.tagName === "BUTTON" && element.childElementCount) return;
+      const text = element.textContent.trim(); if (KO_UI[text]) element.textContent = KO_UI[text]; else if (/^\d+ CHANGES$/.test(text)) element.textContent = text.replace("CHANGES", "개 변경");
+    });
+    root.querySelectorAll("select[data-failure-id] option").forEach((option) => { if (FAILURE_KO[option.textContent]) option.label = FAILURE_KO[option.textContent]; });
+  }
 
   const NODE_DEFS = {
-    imageInput: { label: "Image Input", category: "Input", inputs: [], outputs: ["source image"] },
-    referenceInput: { label: "Reference Input", category: "Input", inputs: [], outputs: ["reference images"] },
-    representation: { label: "Representation", category: "Representation", inputs: ["intent", "attributes"], outputs: ["Representation State"] },
-    referenceAnalyzer: { label: "Reference Analyzer", category: "Representation", inputs: ["reference image"], outputs: ["transferable attributes"] },
-    attributeSelector: { label: "Attribute Selector", category: "Representation", inputs: ["analyzed attributes"], outputs: ["selected attributes"] },
-    camera: { label: "Camera", category: "Control", inputs: ["base State"], outputs: ["camera State"] },
-    lighting: { label: "Lighting", category: "Control", inputs: ["base State"], outputs: ["lighting State"] },
-    material: { label: "Material", category: "Control", inputs: ["base State"], outputs: ["material State"] },
-    atmosphere: { label: "Atmosphere", category: "Control", inputs: ["base State"], outputs: ["atmosphere State"] },
-    altBuilder: { label: "Alt Builder", category: "Control", inputs: ["base State"], outputs: ["alternative States"] },
-    regionMask: { label: "Region Mask", category: "Local Edit", inputs: ["source image"], outputs: ["selected Region"] },
-    regionEdit: { label: "Region Edit", category: "Local Edit", inputs: ["source image", "base State", "selected Region"], outputs: ["edited instruction"] },
-    ofat: { label: "OFAT", category: "Experiment", inputs: ["base State"], outputs: ["variant States"] },
-    compare: { label: "Compare", category: "Experiment", inputs: ["generated variants"], outputs: ["comparison set"] },
-    evaluation: { label: "Evaluation", category: "Experiment", inputs: ["results"], outputs: ["scores"] },
-    compiler: { label: "Prompt Compiler", category: "Output", inputs: ["Representation State"], outputs: ["generation instruction"] },
-    generator: { label: "Generator", category: "Output", inputs: ["generation instruction"], outputs: ["generated images"] },
+    imageInput: { label: "이미지 입력", category: "Input", inputs: [], outputs: ["소스 이미지"] },
+    referenceInput: { label: "레퍼런스 입력", category: "Input", inputs: [], outputs: ["레퍼런스 이미지"] },
+    representation: { label: "표현 상태", category: "Representation", inputs: ["의도", "속성"], outputs: ["표현 상태"] },
+    referenceAnalyzer: { label: "레퍼런스 분석", category: "Representation", inputs: ["레퍼런스 이미지"], outputs: ["전이 가능 속성"] },
+    attributeSelector: { label: "속성 선택", category: "Representation", inputs: ["분석된 속성"], outputs: ["선택된 속성"] },
+    camera: { label: "카메라", category: "Control", inputs: ["기본 상태"], outputs: ["카메라 상태"] },
+    lighting: { label: "조명", category: "Control", inputs: ["기본 상태"], outputs: ["조명 상태"] },
+    material: { label: "재료", category: "Control", inputs: ["기본 상태"], outputs: ["재료 상태"] },
+    atmosphere: { label: "분위기", category: "Control", inputs: ["기본 상태"], outputs: ["분위기 상태"] },
+    altBuilder: { label: "대안 구성", category: "Control", inputs: ["기본 상태"], outputs: ["대안 상태"] },
+    regionMask: { label: "영역 마스크", category: "Local Edit", inputs: ["소스 이미지"], outputs: ["선택 영역"] },
+    regionEdit: { label: "영역 편집", category: "Local Edit", inputs: ["소스 이미지", "기본 상태", "선택 영역"], outputs: ["편집 지시"] },
+    ofat: { label: "단일 변수 실험", category: "Experiment", inputs: ["기본 상태"], outputs: ["변형 상태"] },
+    compare: { label: "비교", category: "Experiment", inputs: ["생성 결과"], outputs: ["비교 세트"] },
+    evaluation: { label: "평가", category: "Experiment", inputs: ["결과"], outputs: ["평가 점수"] },
+    compiler: { label: "프롬프트 컴파일러", category: "Output", inputs: ["표현 상태"], outputs: ["생성 지시"] },
+    generator: { label: "이미지 생성", category: "Output", inputs: ["생성 지시"], outputs: ["생성 이미지"] },
   };
+
+  const CATEGORY_KO = { Input: "입력", Representation: "표현", Control: "제어", "Local Edit": "지역 편집", Experiment: "실험", Output: "출력", Explore: "탐색", Edit: "편집", Study: "연구" };
 
   const NODE_LIBRARY = {
     Input: ["imageInput", "referenceInput"],
@@ -67,6 +82,24 @@
     "Night Restaurant": { palette: ["amber and deep brown", 80], lightingCharacter: ["low warm pools of light", 90], material: ["dark timber and brushed metal", 70], atmosphere: ["intimate", 80] },
     "Concrete Gallery": { palette: ["cool neutral", 70], lightingCharacter: ["diffuse overhead daylight", 75], material: ["exposed concrete", 90], atmosphere: ["minimal institutional", 65] },
   };
+
+  const REPRESENTATION_PRESETS = [
+    { id: "photoreal_actual", name: "Photoreal Actual", nameKo: "실사 사진", description: "현실적인 재료와 조명 반응을 지닌 실제 인테리어·건축 사진 표현", compilerDirectives: ["Photoreal actual interior or architectural photography.", "Real-world material behavior.", "Natural spatial depth.", "Believable surface response.", "Physically plausible lighting and shadow relationships.", "Realistic architectural photography character.", "Preserve realistic scale and spatial proportion."], materialHints: ["natural material imperfections", "realistic reflections", "believable roughness", "non-uniform surface behavior"], exclusions: ["overly glossy CGI surfaces", "artificial rendering artifacts", "diagrammatic abstraction", "cartoon-like simplification", "excessive synthetic perfection"] },
+    { id: "archviz_render", name: "Archviz Render", nameKo: "아키비즈 렌더", description: "제어된 사실성과 정제된 프레젠테이션을 갖춘 건축 시각화", compilerDirectives: ["High-quality architectural visualization render.", "Refined archviz presentation.", "Controlled realism.", "Clean surface definition.", "Carefully balanced reflections.", "Crisp architectural edge clarity.", "Professionally composed interior visualization."], materialHints: ["refined material response", "clean texture mapping", "controlled reflections", "polished but believable surfaces"], exclusions: ["documentary photography imperfections", "rough conceptual sketch language", "low-detail massing abstraction"] },
+    { id: "sketchup_like", name: "SketchUp-like", nameKo: "스케치업 스타일", description: "형상과 공간 판독성을 강조한 간결한 개념 건축 표현", compilerDirectives: ["SketchUp-like conceptual architectural representation.", "Simple planar surfaces.", "Clear geometric edges.", "Simplified materials.", "Strong spatial legibility.", "Lightweight architectural visualization.", "Reduced photographic complexity."], materialHints: ["flat or lightly textured materials", "simplified shading", "clean surfaces"], exclusions: ["highly photoreal rendering", "cinematic atmosphere", "complex natural imperfections", "excessive material richness"] },
+    { id: "massing_white_model", name: "Massing / White Model", nameKo: "매싱 / 화이트 모델", description: "비례·볼륨·주요 형상에 집중한 건축 매싱 표현", compilerDirectives: ["Architectural massing study.", "Abstract white model representation.", "Focus on primary volume and proportion.", "Strong geometric readability.", "Minimal surface detail.", "Reduced material differentiation.", "Diagrammatic spatial clarity."], materialHints: ["matte white model material", "neutral gray shadow behavior", "paper model or foam model character"], exclusions: ["decorative detail", "realistic furniture styling", "rich textures", "visual clutter", "strong atmospheric storytelling"] },
+  ];
+  const DESIGN_STYLE_PRESETS = [
+    { id: "none", name: "None", nameKo: "선택 안 함", description: "명시적인 디자인 사조를 추가하지 않습니다.", compilerDirectives: [], materialHints: [], formHints: [], exclusions: [] },
+    { id: "modernism", name: "Modernism", nameKo: "모더니즘", description: "기능적이고 합리적이며 절제된 모더니즘 공간 언어", compilerDirectives: ["Modernist architectural language.", "Functional clarity.", "Rational composition.", "Clean orthogonal geometry.", "Minimal ornamentation.", "Calm spatial order.", "Strong relationship between function and form.", "Visual restraint."], materialHints: ["exposed concrete", "painted plaster", "steel", "glass", "restrained timber accents"], formHints: ["orthogonal geometry", "clean planar composition", "horizontal and vertical order"], exclusions: ["ornamental excess", "playful historical quotation", "decorative complexity", "unnecessary sculptural gestures"] },
+    { id: "postmodernism", name: "Postmodernism", nameKo: "포스트모더니즘", description: "유희적이고 상징적이며 역사적 참조를 지닌 건축 표현", compilerDirectives: ["Postmodern architectural language.", "Playful formal composition.", "Historical quotation.", "Graphic geometry.", "Expressive forms.", "Layered symbolism.", "Decorative emphasis.", "Intentional visual contrast and irony."], materialHints: ["colored laminate", "painted stucco", "patterned surfaces", "decorative stone", "expressive metal details"], formHints: ["exaggerated geometry", "symbolic shapes", "contrasting formal elements"], exclusions: ["strict functionalist austerity", "total minimalism", "purely neutral expression"] },
+    { id: "art_deco", name: "Art Deco", nameKo: "아르데코", description: "우아하고 기하학적이며 고급스러운 장식 건축 언어", compilerDirectives: ["Art Deco architectural expression.", "Strong symmetry.", "Vertical emphasis.", "Stepped geometry.", "Refined ornamental rhythm.", "Luxurious but controlled detailing.", "Rich material contrast.", "Elegant geometric decoration."], materialHints: ["brass", "dark timber", "marble", "polished stone", "lacquer", "patterned metal"], formHints: ["stepped forms", "symmetry", "geometric ornament", "vertical rhythm"], exclusions: ["rustic informality", "raw brutal materiality", "soft amorphous organic expression"] },
+    { id: "art_nouveau", name: "Art Nouveau", nameKo: "아르누보", description: "유동적이고 식물적이며 수공예적인 건축 언어", compilerDirectives: ["Art Nouveau design language.", "Flowing organic curves.", "Botanical ornamental logic.", "Graceful line movement.", "Integrated decorative structure.", "Handcrafted detailing.", "Sensuous fluid spatial character."], materialHints: ["curved wood", "decorative glass", "patterned ironwork", "ceramic ornament", "natural motifs"], formHints: ["flowing curves", "asymmetrical organic line work", "botanical geometry"], exclusions: ["rigid orthogonal austerity", "heavy industrial bluntness", "total geometric reduction"] },
+    { id: "brutalism", name: "Brutalism", nameKo: "브루탈리즘", description: "모놀리식하고 거칠며 구조적으로 직접적인 건축 표현", compilerDirectives: ["Brutalist architectural expression.", "Powerful mass.", "Direct structural presence.", "Exposed concrete.", "Raw material honesty.", "Monolithic geometry.", "Strong shadow definition.", "Minimal decorative treatment.", "Weighty spatial character."], materialHints: ["board-formed concrete", "raw plaster", "dark steel", "rough stone", "heavy timber"], formHints: ["massive geometry", "structural repetition", "deep openings", "heavy planar expression"], exclusions: ["decorative softness", "polished luxury styling", "playful postmodern color logic", "excessive ornament"] },
+    { id: "organic", name: "Organic", nameKo: "오가닉", description: "유동적이고 자연 친화적이며 촉각적인 공간 언어", compilerDirectives: ["Organic architectural language.", "Soft flowing geometry.", "Natural spatial continuity.", "Curvilinear transitions.", "Non-rigid form.", "Tactile material presence.", "Nature-associated expression.", "Spatial rhythm inspired by biological growth, erosion or natural formation."], materialHints: ["timber", "natural stone", "clay-like finishes", "tactile plaster", "textured organic surfaces"], formHints: ["curved transitions", "irregular geometry", "softened corners", "flowing spatial sequence"], exclusions: ["strict orthogonal repetition", "overly mechanical expression", "rigid diagrammatic symmetry"] },
+  ];
+  const representationPresetById = Object.fromEntries(REPRESENTATION_PRESETS.map((preset) => [preset.id, preset]));
+  const designStylePresetById = Object.fromEntries(DESIGN_STYLE_PRESETS.map((preset) => [preset.id, preset]));
 
   function defaultRepresentation() {
     return {
@@ -114,44 +147,54 @@
           secondary: attr("lime plaster", "controlled", "system", 60),
           finish: attr("matte", "controlled", "system", 70),
         },
+        output: {
+          representationPreset: attr("photoreal_actual", "controlled", "preset", 80),
+          designStylePreset: attr("none", "controlled", "preset", 70),
+          userExclusions: attr("", "controlled", "user", 100),
+        },
       },
       regions: [],
     };
   }
 
+  function ensureOutputState(representation) {
+    if (!representation.global.output) representation.global.output = clone(defaultRepresentation().global.output);
+    return representation;
+  }
+
   const templateConfigs = [
     {
-      id: "interior-refine", title: "Interior Refine", purpose: "기존 인테리어 방향을 보존하며 재료·조명·분위기를 정교화합니다.",
+      id: "interior-refine", title: "인테리어 리파인", purpose: "기존 인테리어 방향을 보존하며 재료·조명·분위기를 정교화합니다.",
       nodes: ["imageInput", "representation", "camera", "lighting", "material", "generator", "compare"],
       recommended: ["35mm · Full Frame · 높이 1500mm", "Pitch 0° · Perspective correction ON", "3000K · Exposure +0.2 · Softness 70"],
       locked: ["geometry", "major layout", "camera position", "composition"], editable: ["materials", "lighting", "atmosphere", "furniture", "surface character"],
     },
     {
-      id: "alt-exploration", title: "Alt Exploration", purpose: "형상과 카메라는 보존하고 여러 표현 변수를 함께 바꾼 대안을 만듭니다.",
+      id: "alt-exploration", title: "대안 탐색", purpose: "형상과 카메라는 보존하고 여러 표현 변수를 함께 바꾼 대안을 만듭니다.",
       nodes: ["imageInput", "representation", "altBuilder", "generator", "compare"],
       recommended: ["Alternatives 4", "Targets: material, palette, lighting, atmosphere", "Variation scope: coordinated"],
       locked: ["geometry", "camera", "major layout"], editable: ["materials", "palette", "lighting", "atmosphere", "furniture expression", "visual density"],
     },
     {
-      id: "furniture-swap", title: "Furniture Swap", purpose: "선택한 가구만 지역 마스크 안에서 교체하거나 재료·색·형태를 수정합니다.",
+      id: "furniture-swap", title: "가구 교체", purpose: "선택한 가구만 지역 마스크 안에서 교체하거나 재료·색·형태를 수정합니다.",
       nodes: ["imageInput", "regionMask", "regionEdit", "generator", "compare"],
       recommended: ["Operation: Replace", "Region position/scale/orientation locked", "Outside mask unchanged"],
       locked: ["global camera", "global geometry", "global lighting", "composition"], editable: ["region material", "region color", "region form"],
     },
     {
-      id: "camera-study", title: "Camera Study", purpose: "카메라 초점거리만 OFAT 방식으로 비교합니다.",
+      id: "camera-study", title: "카메라 연구", purpose: "카메라 초점거리만 OFAT 방식으로 비교합니다.",
       nodes: ["imageInput", "camera", "ofat", "generator", "compare"],
       recommended: ["Focal length: 24 / 35 / 50 / 85mm", "Full Frame sensor", "Unrelated state unchanged"],
       locked: ["lighting", "materials", "geometry", "atmosphere"], editable: ["focal length"],
     },
     {
-      id: "lighting-study", title: "Lighting Study", purpose: "색온도 또는 부드러움을 하나씩 변화시켜 조명 반응을 비교합니다.",
+      id: "lighting-study", title: "조명 연구", purpose: "색온도 또는 부드러움을 하나씩 변화시켜 조명 반응을 비교합니다.",
       nodes: ["imageInput", "lighting", "ofat", "generator", "compare"],
       recommended: ["CCT: 2700 / 3000 / 4000 / 5500K", "or Softness: 20 / 45 / 70 / 95", "Unrelated state unchanged"],
       locked: ["camera", "materials", "geometry", "composition"], editable: ["color temperature", "softness"],
     },
     {
-      id: "reference-mix", title: "Reference Mix", purpose: "각 레퍼런스에서 선택한 속성만 하나의 Representation State로 병합합니다.",
+      id: "reference-mix", title: "레퍼런스 믹스", purpose: "각 레퍼런스에서 선택한 속성만 하나의 표현 상태로 병합합니다.",
       nodes: ["referenceInput", "referenceAnalyzer", "attributeSelector", "representation", "generator", "compare"],
       recommended: ["Reference A → lighting", "Reference B → material", "Reference C → palette", "Reference D → atmosphere"],
       locked: ["target content", "room geometry"], editable: ["transfer selections", "attribute strengths"],
@@ -159,12 +202,12 @@
   ];
 
   const moduleConfigs = {
-    "alt-exploration": { title: "Alt Exploration", category: "Explore", nodes: ["representation", "altBuilder", "generator", "compare"], inputs: ["base image", "base Representation State"], outputs: ["alternative variants", "comparison set"] },
-    "reference-mix": { title: "Reference Mix", category: "Explore", nodes: ["referenceInput", "referenceAnalyzer", "attributeSelector", "representation"], inputs: ["reference images", "target State"], outputs: ["merged Representation State"] },
-    "furniture-swap": { title: "Furniture Swap", category: "Edit", nodes: ["regionMask", "regionEdit", "generator", "compare"], inputs: ["source image", "base State", "selected Region"], outputs: ["edited image", "new experiment snapshot"] },
-    "region-edit": { title: "Region Edit", category: "Edit", nodes: ["regionMask", "regionEdit", "generator"], inputs: ["source image", "selected Region"], outputs: ["edited image"] },
-    "camera-study": { title: "Camera Study", category: "Study", nodes: ["camera", "ofat", "generator", "compare"], inputs: ["base image", "base Representation State"], outputs: ["generated variants", "comparison set"] },
-    "lighting-study": { title: "Lighting Study", category: "Study", nodes: ["lighting", "ofat", "generator", "compare"], inputs: ["base image", "base Representation State"], outputs: ["generated variants", "comparison set"] },
+    "alt-exploration": { title: "대안 탐색", category: "Explore", nodes: ["representation", "altBuilder", "generator", "compare"], inputs: ["기본 이미지", "기본 표현 상태"], outputs: ["대안 결과", "비교 세트"] },
+    "reference-mix": { title: "레퍼런스 믹스", category: "Explore", nodes: ["referenceInput", "referenceAnalyzer", "attributeSelector", "representation"], inputs: ["레퍼런스 이미지", "대상 상태"], outputs: ["병합된 표현 상태"] },
+    "furniture-swap": { title: "가구 교체", category: "Edit", nodes: ["regionMask", "regionEdit", "generator", "compare"], inputs: ["소스 이미지", "기본 상태", "선택 영역"], outputs: ["편집 이미지", "새 실험 스냅샷"] },
+    "region-edit": { title: "영역 편집", category: "Edit", nodes: ["regionMask", "regionEdit", "generator"], inputs: ["소스 이미지", "선택 영역"], outputs: ["편집 이미지"] },
+    "camera-study": { title: "카메라 연구", category: "Study", nodes: ["camera", "ofat", "generator", "compare"], inputs: ["기본 이미지", "기본 표현 상태"], outputs: ["생성 결과", "비교 세트"] },
+    "lighting-study": { title: "조명 연구", category: "Study", nodes: ["lighting", "ofat", "generator", "compare"], inputs: ["기본 이미지", "기본 표현 상태"], outputs: ["생성 결과", "비교 세트"] },
   };
 
   function makeGraph(nodeTypes, moduleId = null, origin = { x: 120, y: 150 }) {
@@ -189,36 +232,82 @@
     if (["furniture-swap", "camera-study"].includes(templateId)) Object.values(g.lighting).forEach(lock);
     if (templateId === "camera-study") { g.camera.focalLengthMm.mode = "controlled"; g.camera.focalLengthMm.source = "template"; }
     if (templateId === "lighting-study") { g.lighting.colorTemperatureK.mode = "controlled"; g.lighting.colorTemperatureK.source = "template"; }
+    g.output.representationPreset.value = "photoreal_actual";
+    g.output.representationPreset.source = "preset";
+    g.output.designStylePreset.value = "none";
+    g.output.designStylePreset.source = "preset";
     return state;
   }
 
   function createProject(templateId = null, name = null) {
     const template = templateConfigs.find((item) => item.id === templateId);
     const graph = makeGraph(template ? template.nodes : ["imageInput", "representation", "compiler", "generator", "compare"]);
+    const preferredNode = graph.nodes.find((node) => node.type === "camera")
+      || graph.nodes.find((node) => node.type === "lighting")
+      || graph.nodes.find((node) => node.type === "regionMask")
+      || graph.nodes.find((node) => node.type === "representation")
+      || graph.nodes[0];
     return {
-      id: uid("project"), name: name || (template ? `${template.title} Project` : "Blank Project"), templateId,
+      id: uid("project"), name: name || (template ? `${template.title} 프로젝트` : "빈 프로젝트"), templateId,
       createdAt: now(), updatedAt: now(), sourceImage: null, referenceImages: [],
       representation: applyTemplateState(defaultRepresentation(), templateId), graph,
-      experiments: [], selectedExperimentIds: [], selectedNodeId: graph.nodes[0]?.id || null,
-      selectedNodeIds: [], activeRegionId: null, workspaceMode: "graph", debug: false,
+      experiments: [], selectedExperimentIds: [], selectedNodeId: preferredNode?.id || null,
+      selectedNodeIds: [], activeRegionId: null, workspaceMode: "image", debug: false,
+      execution: globalThis.VRL_AI?.defaultProjectExecution?.() || { useGlobalDefaults: true, generationModel: null, editModel: null, referenceModel: null, generatorOverrides: {}, aspectRatio: "4:3", quality: "high", count: 1 },
+      engineSetupDismissed: false,
     };
   }
 
   let store = { projects: [], activeProjectId: null };
   let customModules = [];
+  let aiSettings = globalThis.VRL_AI?.defaultSettings?.() || { generationModel: null, editModel: null, referenceModel: null, mockExplicit: false };
+  let providerStatuses = { openai: "not_connected", google: "not_connected", mock: "connected" };
+  const modelRouter = globalThis.VRL_AI ? new globalThis.VRL_AI.ModelRouter() : null;
+  let generationRuntime = { stage: null, error: null };
   let route = "landing";
   let selectedTemplateId = templateConfigs[0].id;
+  let landingDetailOpen = false;
   let maskRuntime = { tool: "brush", size: 28, opacity: 0.55, visible: true, drawing: false, canvas: null, ctx: null };
 
   function activeProject() { return store.projects.find((project) => project.id === store.activeProjectId) || null; }
+  function ensureExecutionState(project) {
+    if (!project.execution) project.execution = globalThis.VRL_AI?.defaultProjectExecution?.() || { useGlobalDefaults: true, generationModel: null, editModel: null, referenceModel: null, generatorOverrides: {}, aspectRatio: "4:3", quality: "high", count: 1 };
+    project.execution.generatorOverrides ||= {};
+    project.execution.aspectRatio ||= "4:3";
+    project.execution.quality ||= "high";
+    project.execution.count ||= 1;
+    return project.execution;
+  }
+  function selectedGenerator(project) { return project.graph.nodes.find((node) => node.id === project.selectedNodeId && node.type === "generator") || project.graph.nodes.find((node) => node.type === "generator") || null; }
+  function providerName(id) { return globalThis.VRL_AI?.providers?.find((provider) => provider.id === id)?.name || String(id || "—").toUpperCase(); }
+  function modelName(id) { return globalThis.VRL_AI?.modelById?.[id]?.name || id || "모델 미선택"; }
+  function effectiveSelection(project, capability = "generation", nodeId = null) { return globalThis.VRL_AI?.selectionFor?.(capability, aiSettings, ensureExecutionState(project), nodeId) || null; }
+  async function refreshProviderStatuses(rerender = false) {
+    if (typeof location === "undefined" || !/^https?:$/.test(location.protocol)) return providerStatuses;
+    try { const response = await fetch("/api/ai/status", { cache: "no-store" }); const payload = await response.json(); if (response.ok) providerStatuses = { ...providerStatuses, ...payload.providers }; }
+    catch { providerStatuses = { ...providerStatuses, openai: "unavailable", google: "unavailable" }; }
+    if (rerender && route === "workspace") renderWorkspace();
+    return providerStatuses;
+  }
   function load() {
     try { store = JSON.parse(localStorage.getItem(STORAGE_KEY)) || store; } catch { store = { projects: [], activeProjectId: null }; }
     try { customModules = JSON.parse(localStorage.getItem(MODULE_KEY)) || []; } catch { customModules = []; }
+    try { aiSettings = { ...(globalThis.VRL_AI?.defaultSettings?.() || aiSettings), ...(JSON.parse(localStorage.getItem(AI_SETTINGS_KEY)) || {}) }; } catch { aiSettings = globalThis.VRL_AI?.defaultSettings?.() || aiSettings; }
+    const oldModuleTitles = { "Alt Exploration": "대안 탐색", "Reference Mix": "레퍼런스 믹스", "Furniture Swap": "가구 교체", "Region Edit": "영역 편집", "Camera Study": "카메라 연구", "Lighting Study": "조명 연구" };
+    store.projects.forEach((project) => {
+      if (project.name === "Blank Project") project.name = "빈 프로젝트";
+      ensureOutputState(project.representation);
+      ensureExecutionState(project);
+      if (project.workspaceMode === "graph") project.workspaceMode = "system";
+      if (!["image", "system", "compare", "region", "design", "models"].includes(project.workspaceMode)) project.workspaceMode = "image";
+      project.graph?.nodes?.forEach((node) => { if (NODE_DEFS[node.type]) node.label = NODE_DEFS[node.type].label; if (oldModuleTitles[node.moduleTitle]) node.moduleTitle = oldModuleTitles[node.moduleTitle]; });
+    });
+    customModules.forEach((module) => { if (oldModuleTitles[module.title]) module.title = oldModuleTitles[module.title]; module.nodes?.forEach((node) => { if (NODE_DEFS[node.type]) node.label = NODE_DEFS[node.type].label; }); });
     if (store.activeProjectId && activeProject()) route = "workspace";
   }
   function save(message = null) {
     const project = activeProject(); if (project) project.updatedAt = now();
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); localStorage.setItem(MODULE_KEY, JSON.stringify(customModules)); if (message) toast(message); }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); localStorage.setItem(MODULE_KEY, JSON.stringify(customModules)); localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(aiSettings)); if (message) toast(message); }
     catch (error) { toast("저장 공간이 부족합니다. 큰 이미지를 제거하세요."); console.error(error); }
   }
 
@@ -246,35 +335,67 @@
     return `${temperature}; ${balance}; ${soft}; ${lighting.direction.value.toLowerCase()} light direction; exposure ${lighting.exposureEV.value >= 0 ? "+" : ""}${lighting.exposureEV.value} EV; contrast ${lighting.contrast.value}/100.`;
   }
 
-  function compileGlobal(representation) {
-    const g = representation.global;
+  function presetInfluence(strength) { return `${intensity(strength)} influence`; }
+  function applyOutputPreset(representation, kind, presetId, strength = null) {
+    ensureOutputState(representation);
+    const key = kind === "representation" ? "representationPreset" : "designStylePreset";
+    const selection = representation.global.output[key];
+    selection.value = presetId; selection.source = "preset"; selection.mode = "controlled"; selection.enabled = true;
+    if (strength !== null) selection.strength = clamp(Number(strength), 0, 100);
+    return representation;
+  }
+  function hasUserControlledMaterial(globalState) { return Object.values(globalState.material).some((a) => a.enabled && a.mode === "controlled" && a.source === "user"); }
+  function resolvePresetDirectives(preset, globalState) {
+    if (!hasUserControlledMaterial(globalState)) return preset.compilerDirectives;
+    const materialTerms = ["concrete", "plaster", "steel", "stone", "timber", "brass", "marble", "wood", "glass", "laminate", "stucco", "lacquer", "ironwork", "ceramic", "clay"];
+    return preset.compilerDirectives.filter((directive) => !materialTerms.some((term) => directive.toLowerCase().includes(term)));
+  }
+  function compilePresetBlock(preset, selection, globalState, includeFormHints = false) {
+    if (!preset || preset.id === "none" || !selection.enabled) return "";
+    const directives = resolvePresetDirectives(preset, globalState);
+    const materialHints = hasUserControlledMaterial(globalState) ? [] : (preset.materialHints || []);
+    const formHints = includeFormHints ? (preset.formHints || []) : [];
+    return [`Influence: ${presetInfluence(selection.strength)}.`, ...directives, ...(materialHints.length ? [`Recommended material behavior: ${materialHints.join(", ")}.`] : []), ...(formHints.length ? [`Form language: ${formHints.join(", ")}.`] : [])].join(" ");
+  }
+  function mergeExclusions(...groups) {
+    const seen = new Set(), merged = [];
+    groups.flat().filter(Boolean).forEach((item) => { const normalized = item.trim().toLowerCase().replace(/[.]+$/, ""); if (!seen.has(normalized)) { seen.add(normalized); merged.push(item.trim().replace(/[.]+$/, "")); } });
+    return merged;
+  }
+  function compileOutput(representation, selectedRegion = null) {
+    ensureOutputState(representation);
+    const g = representation.global, output = g.output;
+    const representationPreset = representationPresetById[output.representationPreset.value] || REPRESENTATION_PRESETS[0];
+    const designPreset = designStylePresetById[output.designStylePreset.value] || DESIGN_STYLE_PRESETS[0];
     const sections = [];
-    const enabledText = (record) => Object.entries(record).filter(([, a]) => a.enabled).map(([key, a]) => `${key}: ${a.value} (${intensity(a.strength)} emphasis)`).join("; ");
-    if (g.content.subject.enabled) sections.push({ id: "subject", label: "SUBJECT", text: `${g.content.subject.value}.` });
-    sections.push({ id: "structure", label: "STRUCTURE", text: enabledText({ geometry: g.content.geometry, majorLayout: g.content.majorLayout, composition: g.content.composition, furniture: g.content.furniture }) + "." });
+    const enabledText = (record) => Object.entries(record).filter(([, a]) => a.enabled).map(([key, a]) => `${key}: ${a.value} (${intensity(a.strength)} emphasis; source ${a.source})`).join("; ");
+    if (g.content.subject.enabled) sections.push({ id: "subject", label: "SUBJECT / CONTENT", text: `${g.content.subject.value}.` });
+    sections.push({ id: "spatial-preservation", label: "SPATIAL PRESERVATION", text: enabledText({ geometry: g.content.geometry, majorLayout: g.content.majorLayout, composition: g.content.composition, furniture: g.content.furniture }) + "." });
+    sections.push({ id: "representation-preset", label: "REPRESENTATION PRESET", text: compilePresetBlock(representationPreset, output.representationPreset, g) });
+    if (designPreset.id !== "none") sections.push({ id: "design-style-preset", label: "DESIGN STYLE PRESET", text: compilePresetBlock(designPreset, output.designStylePreset, g, true) });
     sections.push({ id: "camera", label: "CAMERA", text: translateCamera(g.camera) });
     sections.push({ id: "lighting", label: "LIGHTING", text: translateLighting(g.lighting) });
-    sections.push({ id: "material", label: "MATERIAL", text: enabledText(g.material) + "." });
-    sections.push({ id: "representation", label: "REPRESENTATION", text: enabledText(g.appearance) + "." });
+    sections.push({ id: "materials", label: "MATERIALS", text: enabledText(g.material) + ". Explicit controlled user materials override all preset material hints." });
+    sections.push({ id: "atmosphere", label: "ATMOSPHERE / APPEARANCE", text: enabledText(g.appearance) + "." });
+    const regions = selectedRegion ? [selectedRegion] : representation.regions;
+    regions.forEach((region) => {
+      const attrs = Object.entries(region.attributes).filter(([, a]) => a?.enabled).map(([key, a]) => `${key}: ${a.value} (source ${a.source})`).join("; ");
+      const preserved = Object.entries(region.preserve).filter(([, value]) => value).map(([key]) => key).join(", ");
+      sections.push({ id: `region-${region.id}-target`, label: "REGION TARGET", text: `${region.name} inside the selected mask.` });
+      sections.push({ id: `region-${region.id}-change`, label: "REGION CHANGE", text: `${region.operation.toUpperCase()}: ${region.instruction || attrs || "apply the explicitly controlled regional attributes"}. Inherit the global ${representationPreset.name} representation and ${designPreset.name} design language.` });
+      sections.push({ id: `region-${region.id}-preserve`, label: "REGION PRESERVE", text: `Preserve exact ${preserved || "surrounding context"}; preserve global output presets, camera and room perspective.` });
+      sections.push({ id: `region-${region.id}-outside`, label: "OUTSIDE MASK", text: "Keep all unselected pixels and scene elements visually unchanged." });
+    });
     const locked = [];
     walkAttributes(representation.global, (path, a) => { if (a.enabled && a.mode === "locked") locked.push(`${path} (${a.value})`); });
-    if (locked.length) sections.push({ id: "preserve", label: "PRESERVE", text: `Preserve exactly: ${locked.join(", ")}.` });
-    sections.push({ id: "exclusions", label: "EXCLUSIONS", text: "Do not add unrepresented objects, materials, styles, or generic aesthetic enhancement terms." });
-    return { sections, prompt: sections.map((section) => `${section.label}:\n${section.text}`).join("\n\n") };
+    if (locked.length) sections.push({ id: "preservation-constraints", label: "PRESERVATION CONSTRAINTS", text: `Preserve exactly: ${locked.join(", ")}.` });
+    const userExclusions = output.userExclusions.value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+    const exclusions = mergeExclusions(representationPreset.exclusions || [], designPreset.exclusions || [], userExclusions, ["unrepresented objects or styles", "generic aesthetic enhancement terms"]);
+    sections.push({ id: "exclusions", label: "EXCLUSIONS", text: `Avoid: ${exclusions.join("; ")}.` });
+    return { sections: sections.filter((section) => section.text), prompt: sections.filter((section) => section.text).map((section) => `${section.label}:\n${section.text}`).join("\n\n") };
   }
-
-  function compileRegionEdit(representation, region) {
-    if (!region) return null;
-    const attrs = Object.entries(region.attributes).filter(([, a]) => a?.enabled).map(([key, a]) => `${key}: ${a.value}`).join("; ");
-    const preserved = Object.entries(region.preserve).filter(([, value]) => value).map(([key]) => key).join(", ");
-    const instruction = [
-      { id: "target", label: "TARGET", text: `${region.name} inside the selected mask.` },
-      { id: "change", label: "CHANGE", text: `${region.operation.toUpperCase()}: ${region.instruction || attrs || "apply the explicitly controlled regional attributes"}.` },
-      { id: "preserve", label: "PRESERVE", text: `Preserve exact ${preserved || "surrounding context"}; preserve global camera and room perspective.` },
-      { id: "outside", label: "OUTSIDE MASK", text: "Keep all unselected pixels and scene elements visually unchanged." },
-    ];
-    return { sections: instruction, prompt: instruction.map((section) => `${section.label}:\n${section.text}`).join("\n\n") };
-  }
+  function compileGlobal(representation) { return compileOutput(representation); }
+  function compileRegionEdit(representation, region) { return region ? compileOutput(representation, region) : null; }
 
   function walkAttributes(object, callback, prefix = "") {
     Object.entries(object).forEach(([key, value]) => {
@@ -330,17 +451,63 @@
     async edit({ representation, region, instruction }) { return [{ id: uid("image"), url: mockInteriorImage(representation, instruction.prompt, region), alt: "Deterministic mock region edit result" }]; }
   }
 
-  async function createExperiment(project, representation, name, parentExperimentId = null, region = null) {
+  function imageAsset(value, name = "image") {
+    if (!value) return null;
+    const mimeType = String(value).match(/^data:([^;,]+)/)?.[1] || "image/png";
+    return String(value).startsWith("data:") ? { dataUrl: value, mimeType, name } : { url: value, mimeType, name };
+  }
+  function routingCapability(project, region = null) {
+    if (region?.maskDataUrl) return "maskEditing";
+    if (region) return "editing";
+    if (project.referenceImages.length) return "imageInput";
+    return "generation";
+  }
+  function resolveExecution(project, region = null, developmentFallback = false) {
+    const capability = routingCapability(project, region), generator = selectedGenerator(project);
+    const settings = developmentFallback && !effectiveSelection(project, capability, generator?.id)
+      ? { ...aiSettings, generationModel: { providerId: "mock", modelId: "mock-image-v1" }, editModel: { providerId: "mock", modelId: "mock-image-v1" }, referenceModel: { providerId: "mock", modelId: "mock-image-v1" }, mockExplicit: true }
+      : aiSettings;
+    if (!modelRouter) return { provider: { id: "mock", name: "MOCK" }, model: { id: "mock-image-v1", name: "Mock Image v1" }, selection: { providerId: "mock", modelId: "mock-image-v1" }, settings, capability };
+    return { ...modelRouter.resolve({ capability, globalSettings: settings, projectExecution: ensureExecutionState(project), nodeId: generator?.id, statuses: providerStatuses }), settings, capability };
+  }
+  function updateGenerationStage(stage, detail = "") {
+    generationRuntime.stage = stage; generationRuntime.error = null;
+    const element = appEl.querySelector?.("#generationStage");
+    if (element) element.innerHTML = `<b>${esc(stage)}</b><span>${esc(detail)}</span><i></i>`;
+  }
+
+  async function createExperiment(project, representation, name, parentExperimentId = null, region = null, strictRouting = false) {
     const instruction = region ? compileRegionEdit(representation, region) : compileGlobal(representation);
-    const provider = region ? new MockImageEditProvider() : new MockImageProvider();
-    const images = region ? await provider.edit({ sourceImage: project.sourceImage, mask: region.maskDataUrl, representation, region, instruction, references: region.referenceImages }) : await provider.generate({ representation, instruction });
+    const routed = resolveExecution(project, region, !strictRouting), operation = region ? "edit" : "generation";
+    updateGenerationStage("ROUTING MODEL", `${providerName(routed.provider.id)} / ${routed.model.name}`);
+    let images;
+    if (routed.provider.id === "mock") {
+      const provider = region ? new MockImageEditProvider() : new MockImageProvider();
+      images = region ? await provider.edit({ sourceImage: project.sourceImage, mask: region.maskDataUrl, representation, region, instruction, references: region.referenceImages }) : await provider.generate({ representation, instruction });
+      images = images.map((image) => ({ ...image, mimeType: "image/svg+xml", providerId: "mock", modelId: "mock-image-v1", createdAt: now() }));
+    } else {
+      updateGenerationStage("GENERATING", `${providerName(routed.provider.id)} / ${routed.model.name}`);
+      const request = {
+        representationState: representation, compiledInstruction: instruction.prompt,
+        sourceImage: imageAsset(project.sourceImage, "source"), mask: imageAsset(region?.maskDataUrl, "mask"),
+        references: (region?.referenceImages || project.referenceImages).map((value, index) => imageAsset(value, `reference-${index + 1}`)).filter(Boolean),
+        aspectRatio: ensureExecutionState(project).aspectRatio, quality: ensureExecutionState(project).quality, count: ensureExecutionState(project).count,
+        regionState: region || undefined, metadata: { projectId: project.id, nodeId: selectedGenerator(project)?.id },
+      };
+      const result = await modelRouter.execute({ capability: routed.capability, operation, globalSettings: routed.settings, projectExecution: ensureExecutionState(project), nodeId: selectedGenerator(project)?.id, statuses: providerStatuses, request });
+      images = (result.images || []).map((image) => ({ ...image, url: image.dataUrl || image.url, alt: `${providerName(image.providerId)} ${modelName(image.modelId)} result` }));
+      if (!images.length) throw new globalThis.VRL_AI.RouterError("UNKNOWN", "Provider returned no image output.");
+    }
     const previous = parentExperimentId ? project.experiments.find((item) => item.id === parentExperimentId) : project.experiments[0];
     const changed = previous ? diffRepresentations(previous.representationState, representation).map((item) => item.path) : [];
     return {
       id: uid("experiment"), name, timestamp: now(), parentExperimentId: previous?.id || null,
-      sourceImages: { base: project.sourceImage, references: clone(project.referenceImages) },
+      sourceImages: { base: project.sourceImage, references: clone(project.referenceImages), mask: region?.maskDataUrl || null },
       representationState: clone(representation), regionStates: clone(representation.regions), graphSnapshot: clone(project.graph),
-      changedVariables: changed, compiledInstruction: instruction, provider: provider.name, generatedImages: images,
+      changedVariables: changed, compiledInstruction: instruction, provider: routed.provider.id, providerId: routed.provider.id, modelId: routed.model.id,
+      providerModelVersion: routed.model.id === "gpt-image-2" ? "gpt-image-2" : null,
+      generationSettings: { operation, capability: routed.capability, aspectRatio: ensureExecutionState(project).aspectRatio, quality: ensureExecutionState(project).quality, count: ensureExecutionState(project).count },
+      generatedImages: images,
       evaluation: { targetFollowed: 3, preserved: 3, controllability: 3, notes: "", failureCause: "" },
     };
   }
@@ -349,15 +516,38 @@
     if (route === "landing") renderLanding(); else renderWorkspace();
   }
 
+  function templateRail(templateId) {
+    const rails = {
+      "interior-refine": ["35 mm", "3000 K", "Geometry locked"],
+      "alt-exploration": ["BASE", "A", "B", "C"],
+      "furniture-swap": ["REGION", "MATERIAL", "PRESERVE"],
+      "camera-study": ["24", "35", "50", "85 mm"],
+      "lighting-study": ["2700", "3000", "4000", "5500 K"],
+      "reference-mix": ["REF", "ATTRIBUTE", "MERGED STATE"],
+    };
+    return rails[templateId] || ["STATE A", "STATE B"];
+  }
+  function templatePreviewImage(templateId) {
+    const representation = applyTemplateState(defaultRepresentation(), templateId);
+    if (templateId === "camera-study") representation.global.camera.focalLengthMm.value = 50;
+    if (templateId === "lighting-study") representation.global.lighting.colorTemperatureK.value = 4000;
+    return mockInteriorImage(representation, compileGlobal(representation).prompt);
+  }
+  function railMarkup(values, label = "VARIABLE") {
+    return `<div class="key-rail" aria-label="${esc(label)}"><div class="key-rail-line">${values.map((value, index) => `<span class="${index === 1 ? "active" : ""}"><i></i>${esc(value)}</span>`).join("")}</div></div>`;
+  }
+
   function renderLanding() {
     const selected = templateConfigs.find((item) => item.id === selectedTemplateId) || templateConfigs[0];
-    appEl.innerHTML = `<main class="landing">
-      <header class="landing-head"><div><div class="eyebrow">VRL · MVP v0.2 · Local workspace</div><h1 class="title">VISUAL REPRESENTATION LAB</h1><p class="subtitle">명시적 Representation State를 노드, 프리셋, 워크플로 모듈로 제어하는 인테리어 시각화 실험 환경</p></div><div class="row wrap"><button class="btn" data-action="blank-project">＋ BLANK PROJECT</button>${store.projects.length ? `<button class="btn secondary" data-action="resume-project">최근 프로젝트 열기 (${store.projects.length})</button>` : ""}</div></header>
-      <div class="spread" style="margin-top:28px"><div><div class="eyebrow">Recommended templates</div><p class="subtitle">템플릿은 프로젝트 생성 시 복제됩니다. 이후 템플릿 변경은 기존 프로젝트에 영향을 주지 않습니다.</p></div></div>
-      <section class="launcher">${templateConfigs.map((template) => `<button class="template-card ${template.id === selected.id ? "active" : ""}" data-template="${template.id}"><div class="template-preview"></div><div class="template-body"><h3>${esc(template.title)}</h3><p>${esc(template.purpose)}</p><div class="template-facts"><div class="template-fact"><b>CONTROL</b><span>${esc(template.editable.slice(0, 3).join(" / "))}</span></div><div class="template-fact"><b>PRESERVE</b><span>${esc(template.locked.slice(0, 3).join(" / "))}</span></div><div class="template-fact"><b>DEFAULT</b><span>${esc(template.recommended[0])}</span></div></div></div></button>`).join("")}</section>
-      <section class="template-detail"><div class="detail-panel"><div class="eyebrow">Template preview</div><h2 style="font-size:20px;margin:6px 0">${esc(selected.title).toUpperCase()}</h2><p class="subtitle">${esc(selected.purpose)}</p><div class="graph-mini">${selected.nodes.map((type, index) => `${index ? "<i>→</i>" : ""}<span>${esc(NODE_DEFS[type].label)}</span>`).join("")}</div><button class="btn accent" data-action="use-template" data-template="${selected.id}">USE TEMPLATE</button></div><div class="detail-panel"><div class="config-grid"><div class="config-block"><h4>Recommended settings</h4><p>${selected.recommended.map(esc).join("<br>")}</p></div><div class="config-block"><h4>Locked by default</h4><p>${selected.locked.map((item) => `<span class="badge locked">${esc(item)}</span>`).join("")}</p></div><div class="config-block"><h4>Editable</h4><p>${selected.editable.map((item) => `<span class="badge controlled">${esc(item)}</span>`).join("")}</p></div><div class="config-block"><h4>Reuse rule</h4><p>TEMPLATE → CLONE → PROJECT STATE<br><span class="mono">영구 의존성 없음</span></p></div></div></div></section>
-    </main>`;
-    appEl.querySelectorAll("[data-template]").forEach((el) => el.addEventListener("click", (event) => { if (event.currentTarget.dataset.action === "use-template") return; selectedTemplateId = event.currentTarget.dataset.template; renderLanding(); }));
+    if (landingDetailOpen) {
+      const index = templateConfigs.findIndex((item) => item.id === selected.id);
+      appEl.innerHTML = `<main class="template-page"><header class="template-page-head"><button class="text-action" data-action="close-template">← 워크플로</button><span class="sequence">${String(index + 1).padStart(2, "0")} / ${String(templateConfigs.length).padStart(2, "0")}</span></header><section class="template-hero"><div class="template-hero-copy"><div class="eyebrow">WORKFLOW MODULE</div><h1>${esc(selected.title)}</h1><p>${esc(selected.purpose)}</p>${railMarkup(templateRail(selected.id), selected.title)}</div><figure class="template-hero-visual"><img src="${templatePreviewImage(selected.id)}" alt="${esc(selected.title)} 워크플로 미리보기"><figcaption>REPRESENTATION STATE PREVIEW · MOCK / OFFLINE</figcaption></figure></section><section class="template-spec"><div><div class="eyebrow">CONTROL</div>${selected.editable.map((item) => `<p><span class="state-symbol controlled">●</span>${esc(item)}</p>`).join("")}</div><div><div class="eyebrow">PRESERVE</div>${selected.locked.map((item) => `<p><span class="state-symbol locked">■</span>${esc(item)}</p>`).join("")}</div><div><div class="eyebrow">DEFAULT</div>${selected.recommended.map((item) => `<p>${esc(item)}</p>`).join("")}</div></section><footer class="template-start"><button class="btn secondary" data-action="blank-project">빈 프로젝트</button><button class="btn accent large" data-action="use-template" data-template="${selected.id}">시작 →</button></footer></main>`;
+      appEl.querySelector('[data-action="close-template"]')?.addEventListener("click", () => { landingDetailOpen = false; renderLanding(); });
+    } else {
+      appEl.innerHTML = `<main class="landing"><header class="landing-masthead"><div class="brand-lockup"><span>VRL</span><span>VISUAL<br>REPRESENTATION<br>LAB</span></div><div class="landing-statement"><h1>Build images<br>as systems.</h1><p>이미지를 변수·상태·관계로 설계하고, 무엇이 바뀌었는지 명확히 비교합니다.</p></div><div class="landing-actions">${store.projects.length ? `<button class="text-action" data-action="resume-project">최근 프로젝트 열기 · ${store.projects.length}</button>` : ""}<button class="text-action" data-action="blank-project">＋ 빈 프로젝트</button></div></header><section class="workflow-index"><div class="workflow-index-head"><span class="eyebrow">WORKFLOW INDEX</span><span class="mono">하나의 목적 · 하나의 시작 상태</span></div>${templateConfigs.map((template, index) => `<button class="workflow-index-item" data-template="${template.id}"><span class="workflow-number">${String(index + 1).padStart(2, "0")}</span><div class="workflow-copy"><h2>${esc(template.title)}</h2><p>${esc(template.purpose)}</p>${railMarkup(templateRail(template.id), template.title)}</div><figure><img src="${templatePreviewImage(template.id)}" alt="${esc(template.title)} 미리보기"><figcaption>${esc(template.editable[0])} · ${esc(template.locked[0])}</figcaption></figure><span class="workflow-arrow">→</span></button>`).join("")}</section></main>`;
+    }
+    applyKoreanUi(appEl);
+    appEl.querySelectorAll("[data-template]").forEach((el) => el.addEventListener("click", (event) => { if (event.currentTarget.dataset.action === "use-template") return; selectedTemplateId = event.currentTarget.dataset.template; landingDetailOpen = true; renderLanding(); }));
     appEl.querySelector('[data-action="blank-project"]')?.addEventListener("click", () => startProject(null));
     appEl.querySelector('[data-action="resume-project"]')?.addEventListener("click", () => { store.activeProjectId = store.projects[0]?.id; route = "workspace"; save(); render(); });
     appEl.querySelector('[data-action="use-template"]')?.addEventListener("click", (event) => startProject(event.currentTarget.dataset.template));
@@ -365,36 +555,110 @@
 
   function startProject(templateId) {
     const project = createProject(templateId);
-    store.projects.unshift(project); store.activeProjectId = project.id; route = "workspace"; save("프로젝트를 생성했습니다."); render();
+    landingDetailOpen = false; store.projects.unshift(project); store.activeProjectId = project.id; route = "workspace"; save("프로젝트를 생성했습니다."); render();
+  }
+
+  function projectStateCounts(project) {
+    const counts = { locked: 0, controlled: 0, free: 0 };
+    Object.values(project.representation.global).forEach((group) => Object.values(group).forEach((attribute) => { if (attribute?.mode && counts[attribute.mode] !== undefined) counts[attribute.mode] += 1; }));
+    return counts;
+  }
+  function renderProjectSummary(project) {
+    ensureOutputState(project.representation); const g = project.representation.global, counts = projectStateCounts(project);
+    return `<div class="project-state-summary"><div><b>${g.camera.focalLengthMm.value}<small> mm</small></b><span>${g.lighting.colorTemperatureK.value} K</span></div><div><span>${esc(representationPresetById[g.output.representationPreset.value]?.nameKo || "표현")}</span><span>${esc(designStylePresetById[g.output.designStylePreset.value]?.nameKo || "스타일 없음")}</span></div><div class="state-counts"><span>■ ${counts.locked} 잠금</span><span>● ${counts.controlled} 제어</span><span>○ ${counts.free} 자유</span></div></div>`;
+  }
+  function modelOptions(capability, selection) {
+    return (globalThis.VRL_AI?.compatibleModels?.(capability) || []).map((model) => `<option value="${model.providerId}/${model.id}" ${selection?.modelId === model.id ? "selected" : ""}>${providerName(model.providerId)} / ${esc(model.name)}${model.providerId !== "mock" && providerStatuses[model.providerId] !== "connected" ? " · 연결 필요" : ""}</option>`).join("");
+  }
+  function renderGenerationRuntime() {
+    if (generationRuntime.stage) return `<div class="generation-state" id="generationStage"><b>${esc(generationRuntime.stage)}</b><span>표현 상태와 실행 모델을 보존합니다.</span><i></i></div>`;
+    if (generationRuntime.error) {
+      const recommendations = generationRuntime.error.details?.recommendations || generationRuntime.error.details?.compatibleModels || [];
+      return `<div class="generation-error"><div class="eyebrow">GENERATION FAILED · ${esc(generationRuntime.error.code)}</div><h3>${esc(generationRuntime.error.message)}</h3><p>Representation State와 실험 설정은 보존되었습니다.</p>${recommendations.length ? `<p class="mono">호환 모델: ${recommendations.map((item) => esc(item.name || item)).join(" · ")}</p>` : ""}<div class="row"><button class="btn secondary small" data-action="manage-models">연결 관리</button><button class="btn small" data-action="dismiss-error">닫기</button></div></div>`;
+    }
+    return "";
   }
 
   function renderWorkspace() {
     const project = activeProject();
     if (!project) { route = "landing"; render(); return; }
-    appEl.innerHTML = `<div class="workspace">
-      <header class="topbar"><div class="topbar-left"><button class="btn secondary small" data-action="home">← PROJECTS</button><input class="project-name" id="projectName" value="${esc(project.name)}"><span class="badge">${project.templateId ? esc(templateConfigs.find((t) => t.id === project.templateId)?.title || "TEMPLATE") : "BLANK"}</span></div><div class="topbar-right"><div class="view-switch"><button data-view-mode="graph" class="${(project.workspaceMode || "graph") === "graph" ? "active" : ""}">GRAPH</button><button data-view-mode="image" class="${project.workspaceMode === "image" ? "active" : ""}">IMAGE</button></div><select class="field" id="projectSelect" style="width:170px">${store.projects.map((item) => `<option value="${item.id}" ${item.id === project.id ? "selected" : ""}>${esc(item.name)}</option>`).join("")}</select><button class="btn secondary small" data-action="generate">GENERATE</button><button class="btn secondary small ${project.debug ? "accent" : ""}" data-action="debug">DEBUG ${project.debug ? "ON" : "OFF"}</button></div></header>
-      <div class="workspace-main"><aside class="library">${renderLibrary(project)}</aside>${renderCenterWorkspace(project)}<aside class="inspector" id="inspector">${renderInspector(project)}</aside></div>
-      <section class="results-drawer">${renderResults(project)}</section>
-    </div>`;
+    ensureExecutionState(project); const mode = project.workspaceMode || "image"; const selection = effectiveSelection(project, "generation", selectedGenerator(project)?.id);
+    const inspector = mode === "compare" ? renderDeltaInspector(project) : mode === "models" ? renderProjectRoutingInspector(project) : mode === "design" ? renderDesignSystemInspector(project) : renderInspector(project);
+    const topbar = mode === "region" ? `<header class="topbar region-topbar"><button class="text-action" data-view-mode="image">← 이미지</button><div><span class="eyebrow">REGION EDIT</span><b>${esc(project.representation.regions.find((region) => region.id === project.activeRegionId)?.name || "새 영역")}</b></div><button class="btn accent small" data-action="image-done">완료</button></header>` : `<header class="topbar"><div class="topbar-left"><button class="vrl-mark" data-action="home">VRL</button><input class="project-name" id="projectName" value="${esc(project.name)}" aria-label="프로젝트 이름"><span class="project-context">${project.templateId ? esc(templateConfigs.find((t) => t.id === project.templateId)?.title || "워크플로") : "자유 구성"}</span></div><nav class="mode-nav" aria-label="작업 공간 모드">${[["image","IMAGE"],["system","SYSTEM"],["compare","COMPARE"]].map(([id,label]) => `<button data-view-mode="${id}" class="${mode === id ? "active" : ""}">${label}</button>`).join("")}</nav><div class="topbar-right"><button class="model-status ${selection?.providerId === "mock" ? "offline" : ""}" data-action="manage-models"><span>${selection ? providerName(selection.providerId) : "AI MODELS"}</span><b>${selection ? modelName(selection.modelId) : "연결 필요"}</b></button><button class="btn accent generate-button" data-action="generate">생성 →</button></div></header>`;
+    const showResults = ["image", "system"].includes(mode);
+    appEl.innerHTML = `<div class="workspace mode-${mode} ${showResults ? "has-history" : ""}">${topbar}<div class="workspace-main"><aside class="library">${renderLibrary(project)}</aside>${renderCenterWorkspace(project)}<aside class="inspector" id="inspector">${inspector}</aside></div>${showResults ? `<section class="results-drawer">${renderResults(project)}</section>` : ""}${renderGenerationRuntime()}</div>`;
+    applyKoreanUi(appEl);
     bindWorkspace(project);
   }
 
   function renderCenterWorkspace(project) {
     if (project.workspaceMode === "image") return renderImageWorkspace(project);
-    return `<section class="graph-shell"><div class="graph-canvas" id="graphCanvas"><div class="graph-toolbar"><button class="btn secondary small" data-action="add-default-node">＋ NODE</button><button class="btn secondary small" data-action="add-camera-module">＋ CAMERA STUDY</button><span class="mono" style="padding:5px">${project.graph.nodes.length} nodes · ${project.graph.edges.length} edges</span></div>${renderGraph(project)}</div></section>`;
+    if (project.workspaceMode === "compare") return renderCompareWorkspace(project);
+    if (project.workspaceMode === "region") return renderRegionWorkspace(project);
+    if (project.workspaceMode === "models") return renderAIModels(project);
+    if (project.workspaceMode === "design") return renderDesignSystemPage();
+    return `<section class="graph-shell"><div class="graph-canvas" id="graphCanvas"><div class="graph-toolbar"><button class="btn secondary small" data-action="add-default-node">＋ 노드</button><button class="btn secondary small" data-action="add-camera-module">＋ 카메라 연구</button><button class="text-action" data-view-mode="design">DESIGN SYSTEM</button><span class="mono">${project.graph.nodes.length} nodes · ${project.graph.edges.length} relations</span></div>${renderGraph(project)}</div></section>`;
   }
 
   function renderImageWorkspace(project) {
     const active = project.representation.regions.find((region) => region.id === project.activeRegionId) || null;
     const fallback = mockInteriorImage(project.representation, compileGlobal(project.representation).prompt);
-    return `<section class="image-workspace"><div class="image-toolbar"><button class="btn secondary small ${maskRuntime.tool === "brush" ? "accent" : ""}" data-image-tool="brush">BRUSH</button><button class="btn secondary small ${maskRuntime.tool === "eraser" ? "accent" : ""}" data-image-tool="eraser">ERASE</button><label>SIZE <input id="imageBrushSize" type="range" min="5" max="120" value="${maskRuntime.size}"></label><button class="btn secondary small" data-action="image-clear">CLEAR</button><button class="btn accent small" data-action="image-done">DONE</button></div><div class="image-canvas-shell"><img src="${project.sourceImage || fallback}" alt="Interior visual editing canvas"><canvas id="imageModeMaskCanvas" width="1200" height="800" style="opacity:${maskRuntime.opacity}"></canvas></div><div class="image-region-list"><div class="eyebrow">Regions</div>${project.representation.regions.length ? project.representation.regions.map((region, index) => `<button data-image-region="${region.id}" class="${region.id === project.activeRegionId ? "active" : ""}">${String(index + 1).padStart(2, "0")} · ${esc(region.name)}</button>`).join("") : `<p class="mono">Brush로 대상을 선택한 뒤 Done을 누르세요.</p>`}</div></section>`;
+    const image = project.experiments[0]?.generatedImages[0]?.url || project.sourceImage || fallback, camera = project.representation.global.camera.focalLengthMm;
+    return `<section class="image-workspace"><div class="image-context"><span class="eyebrow">CURRENT IMAGE</span><span>${project.experiments[0] ? esc(project.experiments[0].name) : project.sourceImage ? "SOURCE" : "REPRESENTATION PREVIEW"}</span></div><figure class="image-stage"><img src="${image}" alt="현재 인테리어 작업 이미지"><button class="object-hotspot" data-action="enter-region" title="테이블 영역 편집"><i></i><span>테이블 선택</span></button></figure><div class="image-variable">${renderVariableRail(14, 135, camera.value, "mm", "FOCAL LENGTH")}</div><div class="image-actions"><button class="text-action" data-focus-type="imageInput">이미지 입력</button><button class="text-action" data-focus-type="camera">카메라</button><button class="text-action" data-focus-type="lighting">조명</button><button class="text-action" data-action="enter-region">영역 편집</button></div>${!project.engineSetupDismissed && !aiSettings.generationModel ? renderEngineSetup() : ""}${active ? `<div class="active-region-note"><span class="state-symbol controlled">●</span>${esc(active.name)} · ${esc(active.operation)}</div>` : ""}</section>`;
   }
+
+  function renderVariableRail(min, max, value, unit, label) {
+    const position = clamp(((Number(value) - min) / (max - min)) * 100, 0, 100);
+    return `<div class="variable-rail" style="--rail-position:${position}%"><div class="spread"><span class="eyebrow">${esc(label)}</span><b>${esc(value)} <small>${esc(unit)}</small></b></div><div class="variable-track"><span>${min}</span><i><em></em></i><span>${max}</span></div></div>`;
+  }
+  function renderEngineSetup() {
+    return `<div class="engine-setup"><div class="eyebrow">IMAGE ENGINE · FIRST RUN</div><h3>이미지를 어떻게 생성할까요?</h3><div class="engine-options"><button data-use-engine="openai"><b>OPENAI</b><span>GPT Image 2 · 연결 설정</span></button><button data-use-engine="google"><b>GOOGLE</b><span>Gemini Image · 연결 설정</span></button><button data-use-engine="mock"><b>MOCK</b><span>오프라인 테스트로 사용</span></button></div><button class="text-action" data-action="dismiss-engine">나중에 설정</button></div>`;
+  }
+  function renderRegionWorkspace(project) {
+    const fallback = mockInteriorImage(project.representation, compileGlobal(project.representation).prompt);
+    return `<section class="region-workspace"><figure class="region-stage"><img src="${project.sourceImage || fallback}" alt="영역 마스크 대상 이미지"><canvas id="imageModeMaskCanvas" width="1200" height="800" style="opacity:${maskRuntime.opacity}"></canvas></figure><div class="mask-toolbar"><button class="tool-button ${maskRuntime.tool === "brush" ? "active" : ""}" data-image-tool="brush">브러시</button><button class="tool-button ${maskRuntime.tool === "eraser" ? "active" : ""}" data-image-tool="eraser">지우개</button><label><span>BRUSH</span><input id="imageBrushSize" type="range" min="5" max="120" value="${maskRuntime.size}"><b>${maskRuntime.size} px</b></label><button class="tool-button" data-action="image-clear">지우기</button></div><p class="region-hint">변경할 대상만 칠하세요. 카메라·조명·주변 환경은 잠금 상태로 유지됩니다.</p></section>`;
+  }
+
+  function activeStudy(project) {
+    const node = selectedNode(project), lighting = node?.type === "lighting" || node?.settings?.variable?.includes("colorTemperature") || project.templateId === "lighting-study";
+    return lighting ? { title: "조명 연구", label: "COLOR TEMPERATURE", path: "global.lighting.colorTemperatureK", values: [2700, 3000, 4000, 5500], unit: "K", preserved: ["카메라", "재료", "형상", "구도"] } : { title: "카메라 연구", label: "FOCAL LENGTH", path: "global.camera.focalLengthMm", values: [24, 35, 50, 85], unit: "MM", preserved: ["카메라 위치", "조명", "재료", "구도"] };
+  }
+  function compareItems(project, study) {
+    const actual = project.experiments.filter((item) => item.generatedImages?.length).slice(0, 4);
+    if (actual.length >= 2) return actual.reverse().map((item) => ({ id: item.id, name: item.name, value: pathGet(item.representationState, study.path)?.value ?? "—", image: item.generatedImages[0].url, providerId: item.providerId || item.provider, modelId: item.modelId || "mock-image-v1", actual: true }));
+    return study.values.map((value, index) => { const representation = clone(project.representation); pathGet(representation, study.path).value = value; return { id: `preview-${index}`, name: `${study.label} ${value}`, value, image: mockInteriorImage(representation, compileGlobal(representation).prompt), providerId: "mock", modelId: "mock-image-v1", actual: false }; });
+  }
+  function renderCompareWorkspace(project) {
+    const study = activeStudy(project), items = compareItems(project, study);
+    return `<section class="compare-workspace"><header class="compare-head"><div><span class="eyebrow">${esc(study.label)}</span><h1>${esc(study.title)}</h1></div><div class="compare-sequence">${study.values.join(" / ")} <small>${study.unit}</small></div></header><div class="contact-sheet">${items.map((item, index) => `<article class="comparison-item ${project.selectedExperimentIds.includes(item.id) ? "selected" : ""}"><button ${item.actual ? `data-select-experiment="${item.id}"` : ""}><span class="sequence">${String(index + 1).padStart(2, "0")}</span><img src="${item.image}" alt="${esc(item.name)}"><div><b>${esc(item.value)} <small>${study.unit}</small></b><span>${providerName(item.providerId)} · ${esc(modelName(item.modelId))}</span></div></button></article>`).join("")}</div><footer class="compare-footer"><b>Δ ${esc(study.label)} ONLY</b><span>${study.preserved.map((item) => `${esc(item)} ■ 잠금`).join(" · ")}</span>${items.some((item) => !item.actual) ? `<button class="btn accent small" data-action="run-study">4개 상태 생성 →</button>` : ""}</footer></section>`;
+  }
+
+  function renderAIModels(project) {
+    const generation = aiSettings.generationModel, edit = aiSettings.editModel;
+    return `<section class="models-page"><header><span class="eyebrow">EXECUTION STATE</span><h1>AI MODELS</h1><p>표현 상태와 분리된 생성·편집 실행 경로를 설정합니다. API 키는 서버의 <code>.env.local</code>에서만 읽습니다.</p></header><section class="provider-list"><div class="section-label"><span>CONNECTED SERVICES</span><span>STATUS / CAPABILITY</span></div>${globalThis.VRL_AI.providers.map((provider, index) => { const status = providerStatuses[provider.id] || "not_connected"; const providerModels = globalThis.VRL_AI.models.filter((model) => model.providerId === provider.id); return `<article class="provider-row"><span class="sequence">${String(index + 1).padStart(2, "0")}</span><div><h2>${esc(provider.name)}</h2><p>${provider.mode === "offline" ? "Development / Offline / Deterministic" : providerModels.map((model) => model.name).join(" · ")}</p></div><div class="connection-status ${status}"><i></i><b>${esc(status.replaceAll("_", " ").toUpperCase())}</b><span>${providerModels.flatMap((model) => Object.entries(model.capabilities).filter(([, enabled]) => enabled).map(([key]) => key)).filter((value, i, all) => all.indexOf(value) === i).join(" · ")}</span></div><button class="text-action" data-test-provider="${provider.id}">${provider.id === "mock" ? "확인" : "연결 테스트"}</button></article>`; }).join("")}</section><section class="routing-settings"><div><span class="eyebrow">DEFAULT ROUTING</span><h2>기본 실행 모델</h2></div><label><span>GENERATE</span><select class="field" id="globalGenerationModel"><option value="">선택하지 않음</option>${modelOptions("generation", generation)}</select></label><label><span>REGION EDIT</span><select class="field" id="globalEditModel"><option value="">선택하지 않음</option>${modelOptions("maskEditing", edit)}</select></label><button class="btn accent" data-action="save-ai-routing">저장</button></section><aside class="credential-note"><b>SERVER-SIDE CREDENTIALS</b><p><code>.env.example</code>을 <code>.env.local</code>로 복사한 뒤 <code>OPENAI_API_KEY</code> 또는 <code>GEMINI_API_KEY</code>를 입력하세요. 키는 프로젝트·브라우저 저장소·실험 스냅샷에 포함되지 않습니다.</p></aside></section>`;
+  }
+  function renderDesignSystemPage() {
+    return `<section class="design-system-page"><header><span class="eyebrow">INTERNAL REFERENCE</span><h1>VRL SYSTEM GRAMMAR</h1><p>VARIABLE · STATE · DELTA · RELATION · MODULE</p></header><section><div class="eyebrow">TYPOGRAPHY</div><div class="type-spec"><span>Display 64</span><h2>Image as system.</h2><span>Project 26</span><h3>Interior Study 01</h3><span>Numeric 48</span><b>35 <small>mm</small></b></div></section><section><div class="eyebrow">STATE</div><div class="state-spec"><span>■ LOCKED</span><span>● CONTROLLED</span><span>○ FREE</span></div></section><section><div class="eyebrow">VARIABLE RAIL</div>${renderVariableRail(24, 85, 35, "mm", "FOCAL LENGTH")}</section><section><div class="eyebrow">MODULE / NODE</div><div class="system-samples"><div class="module-sample"><b>CAMERA STUDY</b>${railMarkup(["24", "35", "50", "85"])}</div><div class="node-sample"><span>CAMERA · 01</span><b>35 mm</b><small>1500 mm / 0°</small></div></div></section></section>`;
+  }
+
+  function renderDeltaInspector(project) {
+    const study = activeStudy(project), compared = project.selectedExperimentIds.map((id) => project.experiments.find((item) => item.id === id)).filter(Boolean);
+    let before = study.values[0], after = study.values[1], representationChanges = [];
+    if (compared.length === 2) { before = pathGet(compared[0].representationState, study.path)?.value ?? before; after = pathGet(compared[1].representationState, study.path)?.value ?? after; representationChanges = diffRepresentations(compared[0].representationState, compared[1].representationState); }
+    return `<div class="panel-head"><span class="eyebrow">STATE DELTA</span><h2 class="inspector-title">${esc(study.title)}</h2></div><div class="delta-inspector"><div class="eyebrow">CHANGED</div><div class="delta-value"><span>${esc(before)} <small>${study.unit}</small></span><i>→</i><b>${esc(after)} <small>${study.unit}</small></b></div><p>Δ ${esc(study.label)} ONLY</p><div class="eyebrow">PRESERVED</div>${study.preserved.map((item) => `<div class="delta-row"><span>${esc(item)}</span><b>■ 잠금</b></div>`).join("")}<details><summary>전체 상태 보기</summary><pre class="json">${esc(JSON.stringify(representationChanges, null, 2))}</pre></details></div>`;
+  }
+  function renderProjectRoutingInspector(project) {
+    const execution = ensureExecutionState(project), generation = effectiveSelection(project, "generation"), edit = effectiveSelection(project, "maskEditing");
+    return `<div class="panel-head"><span class="eyebrow">PROJECT ROUTING</span><h2 class="inspector-title">${esc(project.name)}</h2></div><div class="panel-section"><h3>상속 방식</h3><label class="checkline"><input type="checkbox" id="useGlobalRouting" ${execution.useGlobalDefaults ? "checked" : ""}>전역 기본값 사용</label></div><div class="panel-section"><h3>실행 상태</h3><div class="execution-row"><span>생성</span><b>${generation ? `${providerName(generation.providerId)} / ${modelName(generation.modelId)}` : "미설정"}</b></div><div class="execution-row"><span>영역 편집</span><b>${edit ? `${providerName(edit.providerId)} / ${modelName(edit.modelId)}` : "미설정"}</b></div><p class="mono">Representation State에는 이 정보가 포함되지 않습니다.</p></div>${renderProjectSummary(project)}`;
+  }
+  function renderDesignSystemInspector(project) { return `<div class="panel-head"><span class="eyebrow">DESIGN TOKENS</span><h2 class="inspector-title">Quiet interface.<br>Expressive state.</h2></div><div class="panel-section">${renderProjectSummary(project)}</div><div class="panel-section"><button class="btn secondary" data-view-mode="system">← 시스템으로 돌아가기</button></div>`; }
 
   function renderLibrary(project) {
     const modulesByCategory = Object.entries(moduleConfigs).reduce((groups, [id, module]) => { (groups[module.category] ||= []).push({ id, ...module }); return groups; }, {});
-    return `<div class="panel-head"><div class="eyebrow">Node / Module Library</div><div class="mono">NODE ≠ PRESET ≠ MODULE</div></div><div class="panel-section"><h3>Nodes</h3>${Object.entries(NODE_LIBRARY).map(([category, types]) => `<div class="library-group"><h4>${esc(category)}</h4>${types.map((type) => `<button class="library-item" data-add-node="${type}"><span>${esc(NODE_DEFS[type].label)}</span><span class="plus">＋</span></button>`).join("")}</div>`).join("")}</div>
-      <div class="panel-section"><h3>Modules</h3>${Object.entries(modulesByCategory).map(([category, modules]) => `<div class="library-group"><h4>${esc(category)}</h4>${modules.map((module) => `<button class="module-item" data-add-module="${module.id}"><b>＋ ${esc(module.title)}</b><span>${module.nodes.map((type) => NODE_DEFS[type].label).join(" → ")}</span></button>`).join("")}</div>`).join("")}</div>
-      <div class="panel-section"><h3>Custom modules</h3><button class="btn secondary" style="width:100%" data-action="save-module" ${project.selectedNodeIds.length ? "" : "disabled"}>SAVE SELECTION AS MODULE</button><div style="margin-top:8px">${customModules.length ? customModules.map((module) => `<button class="module-item" data-add-custom="${module.id}"><b>＋ ${esc(module.title)}</b><span>${module.nodes.length} cloned nodes</span></button>`).join("") : `<div class="mono">노드를 체크해 선택한 뒤 저장합니다.</div>`}</div></div>`;
+    const projectNav = `<div class="panel-head"><span class="eyebrow">PROJECT</span><h2>${esc(project.name)}</h2></div><div class="panel-section project-navigation"><button class="project-nav-item active"><span>00</span><b>BASE STATE</b></button>${project.experiments.slice(0, 4).map((item, index) => `<button class="project-nav-item" data-load-experiment="${item.id}"><span>${String(index + 1).padStart(2, "0")}</span><b>${esc(item.name)}</b></button>`).join("")}</div><div class="panel-section"><h3>CONTEXT</h3>${[["camera","카메라"],["lighting","조명"],["representation","출력"],["generator","생성기"]].filter(([type]) => project.graph.nodes.some((node) => node.type === type)).map(([type,label]) => `<button class="library-item" data-focus-type="${type}"><span>${label}</span><span>→</span></button>`).join("")}</div>`;
+    const moduleNav = `<div class="panel-section"><h3>MODULES</h3>${Object.entries(modulesByCategory).map(([category, modules]) => `<div class="library-group"><h4>${esc(CATEGORY_KO[category] || category)}</h4>${modules.map((module) => `<button class="module-summary" data-add-module="${module.id}"><span>${esc(module.title)}</span><b>＋</b><i>${module.id === "camera-study" ? "24 — 35 — 50 — 85" : module.id === "lighting-study" ? "2700 — 3000 — 4000 — 5500" : module.nodes.map((type) => NODE_DEFS[type].label).join(" → ")}</i></button>`).join("")}</div>`).join("")}</div>`;
+    if (project.workspaceMode !== "system") return projectNav + moduleNav;
+    return `<div class="panel-head"><div class="eyebrow">SYSTEM LIBRARY</div><div class="mono">NODE · RELATION · MODULE</div></div><div class="panel-section"><h3>노드</h3>${Object.entries(NODE_LIBRARY).map(([category, types]) => `<div class="library-group"><h4>${esc(CATEGORY_KO[category] || category)}</h4>${types.map((type) => `<button class="library-item" data-add-node="${type}"><span>${esc(NODE_DEFS[type].label)}</span><span class="plus">＋</span></button>`).join("")}</div>`).join("")}</div>${moduleNav}<div class="panel-section"><h3>사용자 모듈</h3><button class="btn secondary" style="width:100%" data-action="save-module" ${project.selectedNodeIds.length ? "" : "disabled"}>선택 노드를 모듈로 저장</button><div style="margin-top:8px">${customModules.length ? customModules.map((module) => `<button class="module-summary" data-add-custom="${module.id}"><span>${esc(module.title)}</span><b>＋</b><i>노드 ${module.nodes.length}개</i></button>`).join("") : `<div class="mono">연결된 노드를 선택하면 동일한 문법의 사용자 모듈로 저장됩니다.</div>`}</div></div>`;
   }
 
   function moduleBounds(project, moduleId) {
@@ -419,7 +683,8 @@
     if (node.type === "regionMask") return `${project.representation.regions.length} region(s)<br>independent mask`;
     if (node.type === "regionEdit") return project.activeRegionId ? `active: ${esc(project.representation.regions.find((r) => r.id === project.activeRegionId)?.name || "region")}` : "select or create region";
     if (node.type === "ofat") return `${esc(node.settings.variable?.split(".").pop() || "variable")}<br>${esc(node.settings.values || "")}`;
-    if (node.type === "generator") return `mock provider<br>${project.experiments.length} snapshots`;
+    if (node.type === "generator") { const selection = effectiveSelection(project, "generation", node.id); return `<div class="node-metric"><span>Provider</span><strong>${providerName(selection?.providerId)}</strong></div><div class="node-metric"><span>Model</span><strong>${esc(modelName(selection?.modelId))}</strong></div><div class="node-flow-line"><i></i></div>`; }
+    if (["representation", "compiler"].includes(node.type)) { ensureOutputState(project.representation); const output = project.representation.global.output; const rep = representationPresetById[output.representationPreset.value]; const style = designStylePresetById[output.designStylePreset.value]; return `<div class="node-metric"><span>표현</span><strong>${esc(rep?.nameKo || rep?.name || "—")}</strong></div><div class="node-metric"><span>스타일</span><strong>${esc(style?.nameKo || style?.name || "—")}</strong></div><div class="node-metric"><span>결과</span><strong>${project.experiments.length}</strong></div>`; }
     if (node.type === "imageInput") return project.sourceImage ? "source attached" : "no image · mock ready";
     return `${NODE_DEFS[node.type]?.inputs.length || 0} in · ${NODE_DEFS[node.type]?.outputs.length || 0} out`;
   }
@@ -428,7 +693,7 @@
 
   function renderInspector(project) {
     const node = selectedNode(project);
-    if (!node) return `<div class="panel-head"><div class="eyebrow">Inspector</div></div><div class="panel-section"><div class="empty">그래프에서 노드를 선택하세요.</div></div>`;
+    if (!node) return `<div class="panel-head"><div class="eyebrow">CONTEXT INSPECTOR</div><h2 class="inspector-title">현재 작업을 선택하세요.</h2></div><div class="panel-section">${renderProjectSummary(project)}</div>`;
     const def = NODE_DEFS[node.type] || { category: "Custom", inputs: [], outputs: [] };
     let body = "";
     if (node.type === "camera") body = renderCameraInspector(project, node);
@@ -443,11 +708,13 @@
     else if (node.type === "compiler") body = renderCompilerInspector(project, node);
     else if (node.type === "generator") body = renderGeneratorInspector(project, node);
     else body = `<div class="panel-section"><div class="empty">이 노드는 현재 그래프 흐름과 메타데이터를 제공합니다.</div></div>`;
-    return `<div class="panel-head"><div class="spread"><div><h2 class="inspector-title">${esc(node.label)}</h2><div class="inspector-type">${esc(def.category)} · NODE INSTANCE ${node.id.slice(-6)}</div></div><button class="btn danger small" data-delete-node="${node.id}">DELETE</button></div></div>${body}<div class="panel-section"><h3>Module port contract</h3><div class="port-contract"><b>INPUT</b><span>${def.inputs.length ? def.inputs.map(esc).join(" · ") : "none"}</span><hr class="divider"><b>OUTPUT</b><span>${def.outputs.length ? def.outputs.map(esc).join(" · ") : "none"}</span></div>${node.moduleId ? `<p class="mono">MODULE: ${esc(node.moduleTitle)} · cloned instance ${node.moduleId.slice(-6)}</p>` : ""}</div>${project.debug ? `<div class="panel-section"><h3>Debug node / state</h3><pre class="json">${esc(JSON.stringify({ node, representation: project.representation }, null, 2))}</pre></div>` : ""}`;
+    const outputPresets = ["representation", "compiler"].includes(node.type) ? renderOutputPresetInspector(project) : "";
+    const systemMeta = project.workspaceMode === "system" ? `<div class="panel-section"><h3>입출력 관계</h3><div class="port-contract"><b>입력</b><span>${def.inputs.length ? def.inputs.map(esc).join(" · ") : "없음"}</span><hr class="divider"><b>출력</b><span>${def.outputs.length ? def.outputs.map(esc).join(" · ") : "없음"}</span></div>${node.moduleId ? `<p class="mono">모듈: ${esc(node.moduleTitle)} · ${node.moduleId.slice(-6)}</p>` : ""}</div>` : "";
+    return `<div class="panel-head"><div class="spread"><div><div class="eyebrow">CONTEXT INSPECTOR</div><h2 class="inspector-title">${esc(node.label)}</h2><div class="inspector-type">${esc(CATEGORY_KO[def.category] || def.category)} · ${node.id.slice(-6)}</div></div>${project.workspaceMode === "system" ? `<button class="text-action danger-text" data-delete-node="${node.id}">삭제</button>` : ""}</div></div>${body}${outputPresets}${systemMeta}${project.debug ? `<div class="panel-section"><h3>디버그 상태</h3><pre class="json">${esc(JSON.stringify({ node, execution: project.execution, representation: project.representation }, null, 2))}</pre></div>` : ""}`;
   }
 
   function modeSwitch(path, attribute) {
-    return `<div class="mode-switch">${["locked", "controlled", "free"].map((mode) => `<button class="${attribute.mode === mode ? `active ${mode}` : ""}" data-mode-path="${path}" data-mode="${mode}">${mode === "locked" ? "LOCK" : mode === "controlled" ? "CTRL" : "FREE"}</button>`).join("")}</div>`;
+    return `<div class="mode-switch">${["locked", "controlled", "free"].map((mode) => `<button class="${attribute.mode === mode ? `active ${mode}` : ""}" data-mode-path="${path}" data-mode="${mode}">${mode === "locked" ? "■ 잠금" : mode === "controlled" ? "● 제어" : "○ 자유"}</button>`).join("")}</div>`;
   }
 
   function attributeControl(project, path, label, config = {}) {
@@ -456,53 +723,48 @@
     const disabled = attribute.mode === "locked" ? "disabled" : "";
     let input;
     if (config.type === "select") input = `<select class="field" data-attr-path="${path}" ${disabled}>${config.options.map((option) => `<option value="${esc(option)}" ${String(attribute.value) === String(option) ? "selected" : ""}>${esc(option)}</option>`).join("")}</select>`;
-    else if (config.type === "boolean") input = `<button class="btn secondary small" data-boolean-path="${path}">${attribute.value ? "ON" : "OFF"}</button>`;
-    else if (config.type === "range") input = `<div class="range-line"><input type="range" data-attr-path="${path}" min="${config.min}" max="${config.max}" step="${config.step ?? 1}" value="${attribute.value}"><output>${attribute.value}${config.unit || ""}</output></div>`;
+    else if (config.type === "boolean") input = `<button class="btn secondary small" data-boolean-path="${path}">${attribute.value ? "켜짐" : "꺼짐"}</button>`;
+    else if (config.type === "range") input = `<div class="numeric-control"><div class="unit-value"><input type="number" data-attr-path="${path}" min="${config.min}" max="${config.max}" step="${config.step ?? 1}" value="${attribute.value}" ${disabled}><span>${esc(config.unit || "")}</span></div><div class="numeric-rail"><span>${config.min}</span><input type="range" data-attr-path="${path}" min="${config.min}" max="${config.max}" step="${config.step ?? 1}" value="${attribute.value}" ${disabled}><span>${config.max}</span></div></div>`;
     else input = `<input class="field" data-attr-path="${path}" value="${esc(attribute.value)}">`;
     return `<div class="attribute"><div class="attribute-top"><div><div class="attribute-name">${esc(label)}</div><div class="mono">${esc(attribute.source)} · ${modeLabel(attribute.mode)}</div></div>${modeSwitch(path, attribute)}</div>${input}${config.strength === false ? "" : `<div class="range-line" style="margin-top:6px"><input type="range" data-strength-path="${path}" min="0" max="100" value="${attribute.strength}" ${disabled}><output>strength ${attribute.strength}</output></div>`}</div>`;
   }
 
   function renderCameraInspector(project) {
     const c = project.representation.global.camera;
-    return `<div class="panel-section"><h3>Camera preset</h3><div class="preset-row"><select class="field" id="cameraPreset">${Object.keys(CAMERA_PRESETS).map((name) => `<option>${esc(name)}</option>`).join("")}</select><button class="btn secondary small" data-action="apply-camera-preset">APPLY</button></div><p class="mono">프리셋 적용 후 모든 값은 편집 가능합니다.</p></div><div class="panel-section"><h3>Physical camera state</h3>
-      ${attributeControl(project, "global.camera.sensor", "Sensor", { type: "select", options: ["Full Frame", "APS-C", "Micro Four Thirds"], strength: false })}
-      ${attributeControl(project, "global.camera.focalLengthMm", "Focal Length", { type: "range", min: 14, max: 135, step: 1, unit: "mm", strength: false })}
-      <div class="attribute"><div class="attribute-top"><div><div class="attribute-name">Derived horizontal FOV</div><div class="mono">sensor + focal length · never independent</div></div></div><div class="range-line"><input type="range" id="fovInput" min="15" max="100" step="0.1" value="${horizontalFovDeg(c)}" ${c.focalLengthMm.mode === "locked" ? "disabled" : ""}><output>${horizontalFovDeg(c)}°</output></div></div>
-      ${attributeControl(project, "global.camera.cameraHeightMm", "Camera Height", { type: "range", min: 900, max: 2000, step: 10, unit: "mm", strength: false })}
-      ${attributeControl(project, "global.camera.pitchDeg", "Pitch", { type: "range", min: -20, max: 20, step: 1, unit: "°", strength: false })}
-      ${attributeControl(project, "global.camera.perspectiveCorrection", "Perspective Correction", { type: "boolean", strength: false })}
-      ${attributeControl(project, "global.camera.aspectRatio", "Aspect Ratio", { type: "select", options: ["4:3", "3:2", "16:9", "1:1"], strength: false })}
-      <details><summary class="mono" style="cursor:pointer;padding:12px 0">ADVANCED CAMERA</summary>${attributeControl(project, "global.camera.yawDeg", "Yaw", { type: "range", min: -90, max: 90, step: 1, unit: "°", strength: false })}${attributeControl(project, "global.camera.rollDeg", "Roll", { type: "range", min: -10, max: 10, step: 1, unit: "°", strength: false })}${attributeControl(project, "global.camera.verticalShift", "Vertical Shift", { type: "range", min: -100, max: 100, step: 1, strength: false })}${attributeControl(project, "global.camera.aperture", "Aperture", { type: "range", min: 1.4, max: 16, step: 0.1, unit: " f/", strength: false })}${attributeControl(project, "global.camera.focusDistanceM", "Focus Distance", { type: "range", min: 0.5, max: 30, step: 0.5, unit: "m", strength: false })}</details></div><div class="panel-section"><h3>Model translation</h3><p style="font-size:11px;line-height:1.6">${esc(translateCamera(c))}</p></div>`;
+    return `<div class="inspector-hero"><span class="eyebrow">CAMERA</span><div class="hero-value"><b>${c.focalLengthMm.value}</b><span>mm</span></div><p>${c.cameraHeightMm.value} mm · ${c.perspectiveCorrection.value ? "Perspective Corrected" : "Natural Convergence"}</p><div class="hero-state"><span class="state-symbol ${c.focalLengthMm.mode}">${c.focalLengthMm.mode === "locked" ? "■" : c.focalLengthMm.mode === "controlled" ? "●" : "○"}</span>${modeLabel(c.focalLengthMm.mode)}</div></div><div class="panel-section"><h3>프리셋</h3><div class="preset-row"><select class="field" id="cameraPreset">${Object.keys(CAMERA_PRESETS).map((name) => `<option>${esc(name)}</option>`).join("")}</select><button class="btn secondary small" data-action="apply-camera-preset">적용</button></div></div><div class="panel-section"><h3>PRIMARY</h3>
+      ${attributeControl(project, "global.camera.sensor", "센서", { type: "select", options: ["Full Frame", "APS-C", "Micro Four Thirds"], strength: false })}
+      ${attributeControl(project, "global.camera.focalLengthMm", "초점거리", { type: "range", min: 14, max: 135, step: 1, unit: "mm", strength: false })}
+      ${attributeControl(project, "global.camera.cameraHeightMm", "카메라 높이", { type: "range", min: 900, max: 2000, step: 10, unit: "mm", strength: false })}
+      ${attributeControl(project, "global.camera.pitchDeg", "피치", { type: "range", min: -20, max: 20, step: 1, unit: "°", strength: false })}
+      ${attributeControl(project, "global.camera.perspectiveCorrection", "원근 보정", { type: "boolean", strength: false })}
+      <details class="advanced-section"><summary>ADVANCED +</summary>${attributeControl(project, "global.camera.yawDeg", "요", { type: "range", min: -90, max: 90, step: 1, unit: "°", strength: false })}${attributeControl(project, "global.camera.rollDeg", "롤", { type: "range", min: -10, max: 10, step: 1, unit: "°", strength: false })}${attributeControl(project, "global.camera.verticalShift", "수직 시프트", { type: "range", min: -100, max: 100, step: 1, strength: false })}${attributeControl(project, "global.camera.aperture", "조리개", { type: "range", min: 1.4, max: 16, step: 0.1, unit: "f/", strength: false })}${attributeControl(project, "global.camera.focusDistanceM", "초점 거리", { type: "range", min: 0.5, max: 30, step: 0.5, unit: "m", strength: false })}${attributeControl(project, "global.camera.aspectRatio", "화면 비율", { type: "select", options: ["4:3", "3:2", "16:9", "1:1"], strength: false })}<div class="attribute"><div class="attribute-name">파생 수평 화각</div><div class="unit-value compact"><b>${horizontalFovDeg(c)}</b><span>°</span></div></div></details></div>`;
   }
 
   function renderLightingInspector(project) {
     const l = project.representation.global.lighting;
-    return `<div class="panel-section"><h3>Lighting preset</h3><div class="preset-row"><select class="field" id="lightingPreset">${Object.keys(LIGHTING_PRESETS).map((name) => `<option>${esc(name)}</option>`).join("")}</select><button class="btn secondary small" data-action="apply-lighting-preset">APPLY</button></div></div><div class="panel-section"><h3>Explicit lighting state</h3>
-      ${attributeControl(project, "global.lighting.colorTemperatureK", "Color Temperature", { type: "range", min: 2700, max: 6500, step: 100, unit: "K", strength: false })}
-      ${attributeControl(project, "global.lighting.exposureEV", "Exposure", { type: "range", min: -3, max: 3, step: 0.1, unit: " EV", strength: false })}
-      ${attributeControl(project, "global.lighting.softness", "Softness", { type: "range", min: 0, max: 100, strength: false })}
-      ${attributeControl(project, "global.lighting.contrast", "Contrast", { type: "range", min: 0, max: 100, strength: false })}
-      ${attributeControl(project, "global.lighting.ambientLevel", "Ambient", { type: "range", min: 0, max: 100, strength: false })}
-      ${attributeControl(project, "global.lighting.artificialLevel", "Artificial", { type: "range", min: 0, max: 100, strength: false })}
-      ${attributeControl(project, "global.lighting.direction", "Direction", { type: "select", options: ["Front", "Side", "Back", "Top", "Mixed"], strength: false })}</div><div class="panel-section"><h3>Model translation</h3><p style="font-size:11px;line-height:1.6">${esc(translateLighting(l))}</p></div>`;
+    return `<div class="inspector-hero"><span class="eyebrow">LIGHT</span><div class="hero-value"><b>${l.colorTemperatureK.value}</b><span>K</span></div><p>${l.exposureEV.value >= 0 ? "+" : ""}${l.exposureEV.value} EV · Softness ${l.softness.value}</p><div class="hero-state"><span class="state-symbol ${l.colorTemperatureK.mode}">●</span>${modeLabel(l.colorTemperatureK.mode)}</div></div><div class="panel-section"><h3>프리셋</h3><div class="preset-row"><select class="field" id="lightingPreset">${Object.keys(LIGHTING_PRESETS).map((name) => `<option>${esc(name)}</option>`).join("")}</select><button class="btn secondary small" data-action="apply-lighting-preset">적용</button></div></div><div class="panel-section"><h3>PRIMARY</h3>
+      ${attributeControl(project, "global.lighting.colorTemperatureK", "색온도", { type: "range", min: 2700, max: 6500, step: 100, unit: "K", strength: false })}
+      ${attributeControl(project, "global.lighting.exposureEV", "노출", { type: "range", min: -3, max: 3, step: 0.1, unit: " EV", strength: false })}
+      ${attributeControl(project, "global.lighting.softness", "부드러움", { type: "range", min: 0, max: 100, strength: false })}
+      <details class="advanced-section"><summary>ADVANCED +</summary>${attributeControl(project, "global.lighting.contrast", "대비", { type: "range", min: 0, max: 100, strength: false })}${attributeControl(project, "global.lighting.ambientLevel", "주변광", { type: "range", min: 0, max: 100, strength: false })}${attributeControl(project, "global.lighting.artificialLevel", "인공광", { type: "range", min: 0, max: 100, strength: false })}${attributeControl(project, "global.lighting.direction", "방향", { type: "select", options: ["Front", "Side", "Back", "Top", "Mixed"], strength: false })}</details></div>`;
   }
 
   function renderRepresentationInspector(project, node) {
     const showMaterial = node.type === "material", showAtmosphere = node.type === "atmosphere";
-    if (showMaterial) return `<div class="panel-section"><h3>Material state</h3>${attributeControl(project, "global.material.primary", "Primary Material")}${attributeControl(project, "global.material.secondary", "Secondary Material")}${attributeControl(project, "global.material.finish", "Finish")}${attributeControl(project, "global.appearance.surfaceCharacter", "Surface Character")}</div>`;
-    if (showAtmosphere) return `<div class="panel-section"><h3>Atmosphere state</h3>${attributeControl(project, "global.appearance.atmosphere", "Atmosphere")}${attributeControl(project, "global.appearance.palette", "Palette")}${attributeControl(project, "global.appearance.detailDensity", "Visual Density")}</div>`;
-    return `<div class="panel-section"><h3>Global content / preservation</h3>${attributeControl(project, "global.content.subject", "Interior Subject")}${attributeControl(project, "global.content.geometry", "Room Geometry")}${attributeControl(project, "global.content.majorLayout", "Major Layout")}${attributeControl(project, "global.content.composition", "Composition")}${attributeControl(project, "global.content.furniture", "Furniture")}</div><div class="panel-section"><h3>Representation appearance</h3>${attributeControl(project, "global.appearance.medium", "Medium")}${attributeControl(project, "global.appearance.palette", "Palette")}${attributeControl(project, "global.appearance.detailDensity", "Detail Density")}${attributeControl(project, "global.appearance.texture", "Texture")}${attributeControl(project, "global.appearance.lightingCharacter", "Lighting Character")}${attributeControl(project, "global.appearance.atmosphere", "Atmosphere")}${attributeControl(project, "global.appearance.surfaceCharacter", "Surface Character")}</div>`;
+    if (showMaterial) return `<div class="panel-section"><h3>재료 상태</h3>${attributeControl(project, "global.material.primary", "주요 재료")}${attributeControl(project, "global.material.secondary", "보조 재료")}${attributeControl(project, "global.material.finish", "마감")}${attributeControl(project, "global.appearance.surfaceCharacter", "표면 특성")}</div>`;
+    if (showAtmosphere) return `<div class="panel-section"><h3>분위기 상태</h3>${attributeControl(project, "global.appearance.atmosphere", "분위기")}${attributeControl(project, "global.appearance.palette", "팔레트")}${attributeControl(project, "global.appearance.detailDensity", "시각 밀도")}</div>`;
+    return `<div class="panel-section"><h3>전역 콘텐츠 / 보존</h3>${attributeControl(project, "global.content.subject", "인테리어 주제")}${attributeControl(project, "global.content.geometry", "공간 형상")}${attributeControl(project, "global.content.majorLayout", "주요 배치")}${attributeControl(project, "global.content.composition", "구도")}${attributeControl(project, "global.content.furniture", "가구")}</div><div class="panel-section"><h3>표현 외관</h3>${attributeControl(project, "global.appearance.medium", "매체")}${attributeControl(project, "global.appearance.palette", "팔레트")}${attributeControl(project, "global.appearance.detailDensity", "디테일 밀도")}${attributeControl(project, "global.appearance.texture", "텍스처")}${attributeControl(project, "global.appearance.lightingCharacter", "조명 특성")}${attributeControl(project, "global.appearance.atmosphere", "분위기")}${attributeControl(project, "global.appearance.surfaceCharacter", "표면 특성")}</div>`;
   }
 
   function renderImageInputInspector(project) {
-    return `<div class="panel-section"><h3>Source image</h3><input class="field" type="file" accept="image/*" id="sourceImageInput">${project.sourceImage ? `<img src="${project.sourceImage}" alt="Source interior" style="width:100%;max-height:220px;object-fit:contain;margin-top:8px;border:1px solid var(--line)"><button class="btn danger small" data-action="clear-source" style="margin-top:7px">REMOVE IMAGE</button>` : `<div class="empty" style="margin-top:8px">이미지가 없어도 mock mode는 작동합니다.</div>`}<p class="mono">소스 이미지는 Representation State와 별도로 저장됩니다.</p></div>`;
+    return `<div class="panel-section"><h3>소스 이미지</h3><input class="field" type="file" accept="image/*" id="sourceImageInput">${project.sourceImage ? `<img src="${project.sourceImage}" alt="소스 인테리어" style="width:100%;max-height:220px;object-fit:contain;margin-top:8px;border:1px solid var(--line)"><button class="btn danger small" data-action="clear-source" style="margin-top:7px">이미지 제거</button>` : `<div class="empty" style="margin-top:8px">이미지가 없어도 모의 모드는 작동합니다.</div>`}<p class="mono">소스 이미지는 표현 상태와 별도로 저장됩니다.</p></div>`;
   }
 
   function renderReferenceInspector(project, node) {
     const analyzerNode = node.type === "referenceAnalyzer" ? node : project.graph.nodes.find((item) => item.type === "referenceAnalyzer");
     const preset = analyzerNode?.settings.preset || "Warm Nordic Interior";
     const analyzed = analyzerNode?.settings.analyzed || [];
-    return `<div class="panel-section"><h3>Reference inputs</h3><input class="field" type="file" accept="image/*" multiple id="referenceImageInput"><div class="row wrap" style="margin-top:8px">${project.referenceImages.map((image, index) => `<img src="${image}" alt="Reference ${index + 1}" style="width:64px;height:64px;object-fit:cover;border:1px solid var(--line)">`).join("") || `<span class="mono">이미지 없이 preset analyzer 사용 가능</span>`}</div></div><div class="panel-section"><h3>Mock reference analyzer</h3><select class="field" id="referencePreset">${Object.keys(REFERENCE_PRESETS).map((name) => `<option ${name === preset ? "selected" : ""}>${esc(name)}</option>`).join("")}</select><button class="btn secondary" data-action="analyze-reference" style="width:100%;margin-top:7px">ANALYZE / DECOMPOSE</button><p class="mono">CONTENT와 TRANSFERABLE ATTRIBUTE를 분리합니다.</p></div><div class="panel-section"><h3>Transferable attributes</h3>${analyzed.length ? analyzed.map((item) => `<div class="transfer-row"><div><b>${esc(item.key)}</b><br><span>${esc(item.value)} · ${item.strength}</span></div><button class="btn secondary small" data-transfer-key="${item.key}">TRANSFER</button></div>`).join("") : `<div class="empty">분석을 실행하세요.</div>`}</div>`;
+    return `<div class="panel-section"><h3>레퍼런스 입력</h3><input class="field" type="file" accept="image/*" multiple id="referenceImageInput"><div class="row wrap" style="margin-top:8px">${project.referenceImages.map((image, index) => `<img src="${image}" alt="레퍼런스 ${index + 1}" style="width:64px;height:64px;object-fit:cover;border:1px solid var(--line)">`).join("") || `<span class="mono">이미지 없이 프리셋 분석기를 사용할 수 있습니다.</span>`}</div></div><div class="panel-section"><h3>모의 레퍼런스 분석</h3><select class="field" id="referencePreset">${Object.keys(REFERENCE_PRESETS).map((name) => `<option ${name === preset ? "selected" : ""}>${esc(name)}</option>`).join("")}</select><button class="btn secondary" data-action="analyze-reference" style="width:100%;margin-top:7px">분석 / 속성 분해</button><p class="mono">콘텐츠와 전이 가능 속성을 분리합니다.</p></div><div class="panel-section"><h3>전이 가능 속성</h3>${analyzed.length ? analyzed.map((item) => `<div class="transfer-row"><div><b>${esc(item.key)}</b><br><span>${esc(item.value)} · ${item.strength}</span></div><button class="btn secondary small" data-transfer-key="${item.key}">전이</button></div>`).join("") : `<div class="empty">분석을 실행하세요.</div>`}</div>`;
   }
 
   function renderMaskInspector(project) {
@@ -517,7 +779,8 @@
     if (!region) return `<div class="panel-section"><div class="empty">Region Mask 노드에서 마스크를 그리고 Region을 먼저 생성하세요.</div></div>`;
     project.activeRegionId = region.id;
     const preserveKeys = ["position", "scale", "orientation", "geometry", "lighting", "surroundings"];
-    return `<div class="panel-section"><h3>Active region</h3><select class="field" id="activeRegionSelect">${regions.map((item) => `<option value="${item.id}" ${item.id === region.id ? "selected" : ""}>${esc(item.name)}</option>`).join("")}</select>${region.maskDataUrl ? `<img src="${region.maskDataUrl}" alt="Independent mask" style="width:100%;height:100px;object-fit:contain;background:#222;margin-top:8px">` : ""}</div><div class="panel-section"><h3>Region operation</h3><label class="label">Operation</label><select class="field" id="regionOperation">${["replace", "material", "color", "shape", "add", "remove", "custom"].map((op) => `<option ${region.operation === op ? "selected" : ""}>${op}</option>`).join("")}</select><label class="label">Instruction</label><textarea class="field" id="regionInstruction">${esc(region.instruction)}</textarea><label class="label">Material</label><input class="field" data-region-attribute="material" value="${esc(region.attributes.material.value)}"><label class="label">Color</label><input class="field" data-region-attribute="color" value="${esc(region.attributes.color.value)}"><label class="label">Form</label><input class="field" data-region-attribute="form" value="${esc(region.attributes.form.value)}"><label class="label">Texture</label><input class="field" data-region-attribute="texture" value="${esc(region.attributes.texture.value)}"><label class="label">Region reference image</label><input class="field" id="regionReferenceInput" type="file" accept="image/*">${region.referenceImages.map((image) => `<img src="${image}" alt="Region reference" style="width:62px;height:62px;object-fit:cover;margin:6px 5px 0 0">`).join("")}</div><div class="panel-section"><h3>Preservation</h3><div class="preserve-grid">${preserveKeys.map((key) => `<label class="checkline"><input type="checkbox" data-preserve="${key}" ${region.preserve[key] ? "checked" : ""}>${esc(key)}</label>`).join("")}</div></div><div class="panel-section"><h3>Local compiler</h3><div class="prompt-preview">${compileRegionEdit(project.representation, region).sections.map((section) => `<div class="attribute"><b class="mono">${section.label}</b><div style="font-size:11px;line-height:1.5">${esc(section.text)}</div></div>`).join("")}</div><button class="btn accent" data-action="generate-region" style="width:100%;margin-top:8px">GENERATE REGION EDIT</button></div>`;
+    const before = project.representation.global.material.primary.value, after = region.attributes.material.value;
+    return `<div class="inspector-hero region-hero"><span class="eyebrow">REGION</span><h2>${esc(region.name)}</h2><div class="material-delta"><span>${esc(before)}</span><i>→</i><b>${esc(after)}</b></div><div class="hero-state"><span class="state-symbol controlled">●</span>제어</div></div><div class="panel-section"><h3>CHANGE</h3><select class="field" id="activeRegionSelect">${regions.map((item) => `<option value="${item.id}" ${item.id === region.id ? "selected" : ""}>${esc(item.name)}</option>`).join("")}</select><label class="label">작업</label><select class="field" id="regionOperation">${["replace", "material", "color", "shape", "add", "remove", "custom"].map((op) => `<option ${region.operation === op ? "selected" : ""}>${op}</option>`).join("")}</select><label class="label">재료</label><input class="field" data-region-attribute="material" value="${esc(region.attributes.material.value)}"><label class="label">색상</label><input class="field" data-region-attribute="color" value="${esc(region.attributes.color.value)}"><details class="advanced-section"><summary>ADVANCED +</summary><label class="label">지시문</label><textarea class="field" id="regionInstruction">${esc(region.instruction)}</textarea><label class="label">형태</label><input class="field" data-region-attribute="form" value="${esc(region.attributes.form.value)}"><label class="label">텍스처</label><input class="field" data-region-attribute="texture" value="${esc(region.attributes.texture.value)}"><label class="label">영역 레퍼런스</label><input class="field" id="regionReferenceInput" type="file" accept="image/*">${region.referenceImages.map((image) => `<img src="${image}" alt="Region reference" class="reference-thumb">`).join("")}</details></div><div class="panel-section"><h3>PRESERVE</h3><div class="preserve-grid">${preserveKeys.map((key) => `<label class="checkline"><input type="checkbox" data-preserve="${key}" ${region.preserve[key] ? "checked" : ""}><span>■ ${esc(key)}</span></label>`).join("")}</div></div><div class="panel-section"><details class="advanced-section"><summary>VIEW COMPILED INSTRUCTION</summary><div class="prompt-preview">${compileRegionEdit(project.representation, region).sections.map((section) => `<div class="attribute"><b class="mono">${section.label}</b><div class="instruction-text">${esc(section.text)}</div></div>`).join("")}</div></details><button class="btn accent full" data-action="generate-region">영역 편집 생성 →</button></div>`;
   }
 
   function renderOfatInspector(project, node) {
@@ -531,11 +794,28 @@
 
   function renderCompilerInspector(project) {
     const compiled = compileGlobal(project.representation);
-    return `<div class="panel-section"><h3>Deterministic compiler</h3>${compiled.sections.map((section) => `<div class="attribute"><b class="mono">${section.label}</b><div style="font-size:11px;line-height:1.5">${esc(section.text)}</div></div>`).join("")}</div>`;
+    return `<div class="panel-section"><h3>DETERMINISTIC COMPILER</h3><p class="mono">${compiled.sections.length}개 의미 블록 · 같은 상태는 같은 지시를 생성합니다.</p><details class="advanced-section"><summary>VIEW COMPILED INSTRUCTION</summary>${compiled.sections.map((section) => `<div class="attribute"><b class="mono">${section.label}</b><div class="instruction-text">${esc(section.text)}</div></div>`).join("")}</details></div>`;
   }
 
-  function renderGeneratorInspector(project) {
-    return `<div class="panel-section"><h3>Image provider</h3><div class="port-contract"><b>ACTIVE PROVIDER</b><span>MockImageProvider</span><hr class="divider"><b>MODE</b><span>deterministic SVG interior visualization</span></div><button class="btn accent" data-action="generate" style="width:100%;margin-top:8px">GENERATE SNAPSHOT</button><p class="mono">실제 provider는 동일한 generation request 계약을 구현하면 연결할 수 있습니다.</p></div>`;
+  function renderGeneratorInspector(project, node) {
+    const execution = ensureExecutionState(project), override = execution.generatorOverrides[node.id] || null;
+    const selection = effectiveSelection(project, "generation", node.id), model = globalThis.VRL_AI?.modelById?.[selection?.modelId] || null;
+    const capabilities = model ? Object.entries(model.capabilities).filter(([, enabled]) => enabled).map(([key]) => key) : [];
+    return `<div class="inspector-hero generator-hero"><span class="eyebrow">GENERATOR</span><h2>${selection ? providerName(selection.providerId) : "MODEL REQUIRED"}</h2><p>${esc(model?.name || "AI Models에서 실행 모델을 선택하세요.")}</p><div class="hero-state"><span class="state-symbol ${selection?.providerId === "mock" ? "free" : "controlled"}">${selection?.providerId === "mock" ? "○" : "●"}</span>${selection?.providerId === "mock" ? "OFFLINE / MOCK" : selection ? "REAL GENERATION" : "NOT CONNECTED"}</div></div><div class="panel-section"><h3>MODEL</h3><label class="label">라우팅</label><select class="field" id="generatorRoutingMode"><option value="project" ${!override ? "selected" : ""}>프로젝트 기본값</option><option value="override" ${override ? "selected" : ""}>이 Generator에서 재정의</option></select>${override ? `<label class="label">Provider / Model</label><select class="field" id="generatorModelSelect">${modelOptions("generation", selection)}</select>` : `<div class="execution-summary"><span>${selection ? providerName(selection.providerId) : "—"}</span><b>${esc(model?.name || "모델 미선택")}</b></div>`}<div class="capability-line">${capabilities.map((capability) => `<span>${esc(capability)}</span>`).join("") || `<span>capability unavailable</span>`}</div></div><div class="panel-section"><h3>OUTPUT</h3><label class="label">화면 비율</label><select class="field" id="generationAspect">${(model?.aspectRatios || ["4:3", "3:2", "16:9", "1:1"]).map((ratio) => `<option ${execution.aspectRatio === ratio ? "selected" : ""}>${ratio}</option>`).join("")}</select>${model?.qualities?.length ? `<label class="label">품질</label><select class="field" id="generationQuality">${model.qualities.map((quality) => `<option ${execution.quality === quality ? "selected" : ""}>${quality}</option>`).join("")}</select>` : ""}<label class="label">이미지 수</label><input class="field" type="number" id="generationCount" min="1" max="4" value="${execution.count}"></div><div class="panel-section"><details class="advanced-section"><summary>ADVANCED +</summary><div class="execution-row"><span>Compiled Instruction</span><b>${compileGlobal(project.representation).sections.length} blocks</b></div><div class="execution-row"><span>Reference Input</span><b>${model?.capabilities.imageInput ? "지원" : "미지원"}</b></div><div class="execution-row"><span>Mask Editing</span><b>${model?.capabilities.maskEditing ? "지원" : "미지원"}</b></div></details><button class="btn accent full" data-action="generate">생성 →</button></div>`;
+  }
+
+  function presetPreview(preset, selection, kind) {
+    const traits = preset.compilerDirectives.slice(0, 4).map((text) => text.replace(/[.]+$/, ""));
+    return `<div class="preset-preview"><div class="spread"><div><div class="eyebrow">${kind}</div><h4>${esc(preset.nameKo || preset.name)}</h4></div><span class="badge controlled">${presetInfluence(selection.strength)}</span></div><p>${esc(preset.description)}</p><div class="preset-traits">${traits.map((trait) => `<span>${esc(trait)}</span>`).join("") || `<span>명시적 스타일 지시 없음</span>`}</div><div class="preset-avoid"><b>제외</b>${(preset.exclusions || []).slice(0, 3).map((item) => `<span>${esc(item)}</span>`).join("") || `<span>추가 제외 없음</span>`}</div><details><summary class="mono">고급 · 컴파일 지시 전체</summary><div class="mono" style="margin-top:8px">${preset.compilerDirectives.map((item) => `• ${esc(item)}`).join("<br>")}<br>${(preset.exclusions || []).map((item) => `− ${esc(item)}`).join("<br>")}</div></details></div>`;
+  }
+  function renderOutputPresetInspector(project) {
+    ensureOutputState(project.representation);
+    const output = project.representation.global.output;
+    const representationPreset = representationPresetById[output.representationPreset.value] || REPRESENTATION_PRESETS[0];
+    const designPreset = designStylePresetById[output.designStylePreset.value] || DESIGN_STYLE_PRESETS[0];
+    return `<div class="panel-section output-preset-section"><h3>출력 프리셋</h3><p class="mono">표현 방식과 디자인 언어는 서로 독립적이며 모든 세부 값은 계속 편집할 수 있습니다.</p><label class="label">표현 방식</label><select class="field" id="representationPreset">${REPRESENTATION_PRESETS.map((preset) => `<option value="${preset.id}" ${preset.id === representationPreset.id ? "selected" : ""}>${esc(preset.nameKo)} · ${esc(preset.name)}</option>`).join("")}</select><div class="range-line" style="margin-top:8px"><input id="representationPresetStrength" type="range" min="0" max="100" value="${output.representationPreset.strength}"><output>강도 ${output.representationPreset.strength}</output></div>${presetPreview(representationPreset, output.representationPreset, "표현 프리셋")}
+      <label class="label">디자인 스타일</label><select class="field" id="designStylePreset">${DESIGN_STYLE_PRESETS.map((preset) => `<option value="${preset.id}" ${preset.id === designPreset.id ? "selected" : ""}>${esc(preset.nameKo)}${preset.id === "none" ? "" : ` · ${esc(preset.name)}`}</option>`).join("")}</select><div class="range-line" style="margin-top:8px"><input id="designStylePresetStrength" type="range" min="0" max="100" value="${output.designStylePreset.strength}" ${designPreset.id === "none" ? "disabled" : ""}><output>강도 ${output.designStylePreset.strength}</output></div>${presetPreview(designPreset, output.designStylePreset, "디자인 스타일 프리셋")}
+      <label class="label">사용자 제외 항목</label><textarea class="field" id="userExclusions" placeholder="쉼표 또는 줄바꿈으로 구분">${esc(output.userExclusions.value)}</textarea><p class="mono">우선순위: 사용자 제어값 &gt; 영역 제어값 &gt; 프리셋 &gt; 템플릿 &gt; 시스템 기본값</p></div>`;
   }
 
   function displayDiffValue(value) {
@@ -545,14 +825,7 @@
   }
 
   function renderResults(project) {
-    const compared = project.selectedExperimentIds.map((id) => project.experiments.find((item) => item.id === id)).filter(Boolean);
-    let comparison = "";
-    if (compared.length === 2) {
-      const stateDiff = diffRepresentations(compared[0].representationState, compared[1].representationState);
-      const promptDiff = diffPrompts(compared[0].compiledInstruction, compared[1].compiledInstruction);
-      comparison = `<div class="compare-panel"><div class="diff-block"><div class="eyebrow">State difference</div>${stateDiff.length ? stateDiff.map((item) => `<div class="diff-item"><b>${esc(item.path)}</b><br><code>${esc(displayDiffValue(item.before))} → ${esc(displayDiffValue(item.after))}</code></div>`).join("") : `<div class="diff-item">UNCHANGED</div>`}<span class="badge ${stateDiff.length === 1 ? "controlled" : "changed"}">${stateDiff.length === 1 ? "ONE FACTOR" : `${stateDiff.length} CHANGES`}</span></div><div class="diff-block"><div class="eyebrow">Compiler section difference</div>${promptDiff.length ? promptDiff.map((item) => `<div class="diff-item"><b>${esc(item.id)}</b><br><s>${esc(item.before)}</s><br><span style="color:var(--green)">${esc(item.after)}</span></div>`).join("") : `<div class="diff-item">IDENTICAL PROMPT</div>`}</div></div>`;
-    }
-    return `<div class="results-head"><div><span class="eyebrow">Generation / experiment results</span> <span class="badge">${project.experiments.length} SNAPSHOTS</span></div><div class="row"><span class="mono">두 결과를 선택해 diff</span><button class="btn secondary small" data-action="clear-results-selection">CLEAR SELECTION</button></div></div><div class="results-grid">${comparison}${project.experiments.length ? project.experiments.map((item) => `<article class="result-card ${project.selectedExperimentIds.includes(item.id) ? "selected" : ""}" data-experiment-id="${item.id}"><img src="${item.generatedImages[0]?.url}" alt="${esc(item.generatedImages[0]?.alt || "Generated result")}" data-select-experiment="${item.id}"><div class="result-body"><div class="result-name">${esc(item.name)}</div><div class="mono">${new Date(item.timestamp).toLocaleString()} · ${esc(item.provider)}</div><div style="margin-top:5px">${item.changedVariables.length ? item.changedVariables.slice(0, 3).map((key) => `<span class="badge changed">${esc(key.split(".").slice(-2).join("."))}</span>`).join("") : `<span class="badge">BASELINE</span>`}</div><div class="result-actions"><button class="btn secondary small" data-load-experiment="${item.id}">LOAD</button><button class="btn danger small" data-delete-experiment="${item.id}">DELETE</button></div><details style="margin-top:6px"><summary class="mono" style="cursor:pointer">EVALUATION</summary><div class="evaluation">${["targetFollowed", "preserved", "controllability"].map((key) => `<label>${key}<select class="field" data-eval-id="${item.id}" data-eval-key="${key}">${[1,2,3,4,5].map((n) => `<option ${item.evaluation[key] === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>`).join("")}</div><select class="field" data-failure-id="${item.id}" style="margin-top:5px">${["", "Variable definition failure", "Reference analysis failure", "Representation merge failure", "Prompt compiler failure", "Generator unpredictability", "Preservation failure", "Unknown"].map((value) => `<option ${item.evaluation.failureCause === value ? "selected" : ""}>${value || "Failure cause…"}</option>`).join("")}</select><textarea class="field" data-notes-id="${item.id}" placeholder="Notes">${esc(item.evaluation.notes)}</textarea></details>${project.debug ? `<details><summary class="mono">SNAPSHOT JSON</summary><pre class="json">${esc(JSON.stringify(item, null, 2))}</pre></details>` : ""}</div></article>`).join("") : `<div class="empty" style="width:360px">Generator 노드 또는 상단 GENERATE를 눌러 첫 snapshot을 만드세요.</div>`}</div>`;
+    return `<div class="results-head"><div><span class="eyebrow">VARIANT HISTORY</span><span>${project.experiments.length} STATES</span></div><div class="row"><span class="mono">결과 두 개 선택 → Compare</span>${project.selectedExperimentIds.length ? `<button class="text-action" data-view-mode="compare">비교 열기</button><button class="text-action" data-action="clear-results-selection">선택 해제</button>` : ""}</div></div><div class="results-grid">${project.experiments.length ? project.experiments.map((item, index) => { const changedPath = item.changedVariables[0]; const current = changedPath ? pathGet(item.representationState, changedPath)?.value : null; const parent = item.parentExperimentId ? project.experiments.find((candidate) => candidate.id === item.parentExperimentId) : null; const previous = changedPath && parent ? pathGet(parent.representationState, changedPath)?.value : null; return `<article class="result-card ${project.selectedExperimentIds.includes(item.id) ? "selected" : ""}" data-experiment-id="${item.id}"><button class="result-image" data-select-experiment="${item.id}"><span class="sequence">${String(project.experiments.length - index).padStart(2, "0")}</span><img src="${item.generatedImages[0]?.url}" alt="${esc(item.generatedImages[0]?.alt || "Generated result")}"></button><div class="result-body"><div><span class="eyebrow">${item.providerId === "mock" || item.provider === "mock" ? "OFFLINE" : "REAL GENERATION"}</span><div class="result-name">${esc(item.name)}</div></div><div class="result-provider"><b>${providerName(item.providerId || item.provider)}</b><span>${esc(modelName(item.modelId || "mock-image-v1"))}</span></div><div class="result-delta">${changedPath ? `<span>Δ ${esc(changedPath.split(".").pop())}</span><b>${previous !== null ? `${esc(previous)} → ` : ""}${esc(current)}</b>` : `<span>BASE STATE</span><b>NO DELTA</b>`}</div><details><summary>VIEW STATE</summary><div class="result-actions"><button class="text-action" data-load-experiment="${item.id}">상태 불러오기</button><button class="text-action danger-text" data-delete-experiment="${item.id}">삭제</button></div><div class="evaluation">${["targetFollowed", "preserved", "controllability"].map((key) => `<label>${key}<select class="field" data-eval-id="${item.id}" data-eval-key="${key}">${[1,2,3,4,5].map((n) => `<option ${item.evaluation[key] === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>`).join("")}</div>${project.debug ? `<pre class="json">${esc(JSON.stringify(item, null, 2))}</pre>` : ""}</details></div></article>`; }).join("") : `<div class="history-empty"><span>NO GENERATED STATE</span><p>현재 Representation State는 준비되었습니다.</p><button class="text-action" data-action="generate">첫 상태 생성 →</button></div>`}</div>`;
   }
 
   function addNode(project, type, position = null) {
@@ -577,6 +850,8 @@
       graph.nodes.forEach((node) => { node.moduleTitle = definition.title; if (node.type === "ofat") { if (moduleId === "lighting-study") { node.settings.variable = "global.lighting.colorTemperatureK"; node.settings.values = "2700, 3000, 4000, 5500"; } } });
       project.graph.nodes.push(...graph.nodes); project.graph.edges.push(...graph.edges); project.selectedNodeId = graph.nodes[0]?.id;
     }
+    if (["camera-study", "lighting-study"].includes(moduleId)) project.workspaceMode = "compare";
+    if (["furniture-swap", "region-edit"].includes(moduleId)) { project.workspaceMode = "region"; const maskNode = [...project.graph.nodes].reverse().find((node) => node.type === "regionMask"); if (maskNode) project.selectedNodeId = maskNode.id; }
     save(`${definition.title} 모듈을 기존 그래프에 삽입했습니다.`); renderWorkspace();
   }
 
@@ -605,7 +880,17 @@
     appEl.querySelector("#projectName")?.addEventListener("change", (event) => { project.name = event.target.value.trim() || project.name; save("프로젝트 이름을 저장했습니다."); });
     appEl.querySelector("#projectSelect")?.addEventListener("change", (event) => { store.activeProjectId = event.target.value; save(); renderWorkspace(); });
     appEl.querySelector('[data-action="debug"]')?.addEventListener("click", () => { project.debug = !project.debug; save(); renderWorkspace(); });
-    appEl.querySelectorAll("[data-view-mode]").forEach((button) => button.addEventListener("click", () => { project.workspaceMode = button.dataset.viewMode; if (project.workspaceMode === "image") { const maskNode = project.graph.nodes.find((item) => item.type === "regionMask"); if (maskNode) project.selectedNodeId = maskNode.id; } save(); renderWorkspace(); }));
+    appEl.querySelectorAll("[data-view-mode]").forEach((button) => button.addEventListener("click", () => { const previous = project.workspaceMode; project.workspaceMode = button.dataset.viewMode; if (project.workspaceMode === "image" && previous === "region") { const editNode = project.graph.nodes.find((item) => item.type === "regionEdit"); if (editNode && project.activeRegionId) project.selectedNodeId = editNode.id; } save(); renderWorkspace(); }));
+    appEl.querySelectorAll('[data-action="manage-models"]').forEach((button) => button.addEventListener("click", () => { project.workspaceMode = "models"; generationRuntime.error = null; refreshProviderStatuses(false).finally(() => { save(); renderWorkspace(); }); }));
+    appEl.querySelector('[data-action="dismiss-error"]')?.addEventListener("click", () => { generationRuntime.error = null; renderWorkspace(); });
+    appEl.querySelectorAll('[data-action="enter-region"]').forEach((button) => button.addEventListener("click", () => { const maskNode = project.graph.nodes.find((item) => item.type === "regionMask"); if (!maskNode) return addModule(project, "region-edit"); project.selectedNodeId = maskNode.id; project.workspaceMode = "region"; save(); renderWorkspace(); }));
+    appEl.querySelectorAll("[data-focus-type]").forEach((button) => button.addEventListener("click", () => { const node = project.graph.nodes.find((item) => item.type === button.dataset.focusType); if (!node) return; project.selectedNodeId = node.id; if (button.dataset.focusType === "regionMask") project.workspaceMode = "region"; save(); renderWorkspace(); }));
+    appEl.querySelector('[data-action="dismiss-engine"]')?.addEventListener("click", () => { project.engineSetupDismissed = true; save(); renderWorkspace(); });
+    appEl.querySelectorAll("[data-use-engine]").forEach((button) => button.addEventListener("click", () => { const providerId = button.dataset.useEngine; if (providerId === "mock") { const selection = { providerId: "mock", modelId: "mock-image-v1" }; aiSettings = { ...aiSettings, generationModel: selection, editModel: selection, referenceModel: selection, mockExplicit: true }; project.engineSetupDismissed = true; save("Mock 오프라인 모드를 명시적으로 선택했습니다."); renderWorkspace(); } else { project.workspaceMode = "models"; project.engineSetupDismissed = true; save(); renderWorkspace(); } }));
+    appEl.querySelectorAll("[data-test-provider]").forEach((button) => button.addEventListener("click", async () => { button.disabled = true; button.textContent = "확인 중…"; try { const response = await fetch("/api/ai/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providerId: button.dataset.testProvider }) }); const payload = await response.json(); providerStatuses[button.dataset.testProvider] = payload.status || (response.ok ? "connected" : "unavailable"); toast(payload.message || "연결 상태를 확인했습니다."); } catch { providerStatuses[button.dataset.testProvider] = "unavailable"; toast("로컬 AI 서버에 연결할 수 없습니다."); } renderWorkspace(); }));
+    appEl.querySelector('[data-action="save-ai-routing"]')?.addEventListener("click", () => { const parse = (value) => { if (!value) return null; const [providerId, ...rest] = value.split("/"); return { providerId, modelId: rest.join("/") }; }; aiSettings.generationModel = parse(appEl.querySelector("#globalGenerationModel")?.value); aiSettings.editModel = parse(appEl.querySelector("#globalEditModel")?.value); aiSettings.referenceModel = aiSettings.generationModel; aiSettings.mockExplicit = [aiSettings.generationModel, aiSettings.editModel].some((selection) => selection?.providerId === "mock"); project.engineSetupDismissed = true; save("기본 AI 라우팅을 저장했습니다."); renderWorkspace(); });
+    appEl.querySelector("#useGlobalRouting")?.addEventListener("change", (event) => { ensureExecutionState(project).useGlobalDefaults = event.target.checked; save(); renderWorkspace(); });
+    appEl.querySelector('[data-action="run-study"]')?.addEventListener("click", () => { const study = activeStudy(project); const node = [...project.graph.nodes].reverse().find((item) => item.type === "ofat" && (study.path.includes("lighting") ? item.settings.variable.includes("lighting") : item.settings.variable.includes("camera"))) || project.graph.nodes.find((item) => item.type === "ofat"); if (node) { node.settings.variable = study.path; node.settings.values = study.values.join(", "); runOfat(project, node); } });
     appEl.querySelectorAll('[data-action="generate"]').forEach((button) => button.addEventListener("click", () => generateNormal(project)));
     appEl.querySelector('[data-action="clear-results-selection"]')?.addEventListener("click", () => { project.selectedExperimentIds = []; save(); renderWorkspace(); });
     appEl.querySelector('[data-action="add-default-node"]')?.addEventListener("click", () => addNode(project, "representation"));
@@ -615,7 +900,7 @@
     appEl.querySelectorAll("[data-add-custom]").forEach((button) => button.addEventListener("click", () => addModule(project, null, customModules.find((module) => module.id === button.dataset.addCustom))));
     appEl.querySelector('[data-action="save-module"]')?.addEventListener("click", () => saveSelectionAsModule(project));
     bindGraph(project);
-    if (project.workspaceMode === "image") bindImageWorkspace(project);
+    if (["image", "region"].includes(project.workspaceMode)) bindImageWorkspace(project);
     bindInspector(project);
     bindResults(project);
   }
@@ -634,7 +919,7 @@
       const current = project.representation.regions.find((region) => region.id === project.activeRegionId); const data = canvas.toDataURL("image/png");
       if (current) current.maskDataUrl = data; else { const name = prompt("Region name", `Region ${String(project.representation.regions.length + 1).padStart(2, "0")}`) || "Region"; const region = blankRegion(name, data); project.representation.regions.push(region); project.activeRegionId = region.id; }
       const editNode = project.graph.nodes.find((item) => item.type === "regionEdit"); if (editNode) project.selectedNodeId = editNode.id;
-      save("Region mask를 확정했습니다."); renderWorkspace();
+      project.workspaceMode = "image"; save("Region mask를 확정했습니다."); renderWorkspace();
     });
     appEl.querySelectorAll("[data-image-region]").forEach((button) => button.addEventListener("click", () => { project.activeRegionId = button.dataset.imageRegion; save(); renderWorkspace(); }));
   }
@@ -667,7 +952,7 @@
     appEl.querySelectorAll("[data-attr-path]").forEach((input) => input.addEventListener(input.type === "range" ? "input" : "change", () => {
       const attribute = pathGet(project.representation, input.dataset.attrPath); const old = attribute.value;
       attribute.value = typeof old === "number" ? Number(input.value) : input.value; attribute.source = "user"; if (attribute.mode === "free") attribute.mode = "controlled";
-      if (input.type === "range") input.nextElementSibling && (input.nextElementSibling.textContent = input.value + (input.nextElementSibling.textContent.match(/[a-zA-Z°]+$/)?.[0] || ""));
+      appEl.querySelectorAll("[data-attr-path]").forEach((peer) => { if (peer !== input && peer.dataset.attrPath === input.dataset.attrPath) peer.value = input.value; });
       save(); if (input.type !== "range") renderWorkspace(); else refreshGraphSummaries(project);
     }));
     appEl.querySelectorAll("[data-strength-path]").forEach((input) => input.addEventListener("input", () => { const attribute = pathGet(project.representation, input.dataset.strengthPath); attribute.strength = Number(input.value); attribute.source = "user"; input.nextElementSibling.textContent = `strength ${input.value}`; save(); }));
@@ -692,7 +977,26 @@
     if (node.type === "regionEdit") bindRegionEdit(project);
     if (node.type === "ofat") bindOfat(project, node);
     if (node.type === "altBuilder") bindAlt(project, node);
+    if (["representation", "compiler"].includes(node.type)) bindOutputPresets(project);
+    if (node.type === "generator") bindGeneratorInspector(project, node);
     appEl.querySelector('[data-action="generate-region"]')?.addEventListener("click", () => generateRegion(project));
+  }
+
+  function bindGeneratorInspector(project, node) {
+    const execution = ensureExecutionState(project);
+    appEl.querySelector("#generatorRoutingMode")?.addEventListener("change", (event) => { if (event.target.value === "project") delete execution.generatorOverrides[node.id]; else { const base = effectiveSelection(project, "generation") || { providerId: "mock", modelId: "mock-image-v1" }; execution.generatorOverrides[node.id] = clone(base); if (base.providerId === "mock") aiSettings.mockExplicit = true; } save(); renderWorkspace(); });
+    appEl.querySelector("#generatorModelSelect")?.addEventListener("change", (event) => { const [providerId, ...rest] = event.target.value.split("/"); execution.generatorOverrides[node.id] = { providerId, modelId: rest.join("/") }; if (providerId === "mock") aiSettings.mockExplicit = true; save(); renderWorkspace(); });
+    appEl.querySelector("#generationAspect")?.addEventListener("change", (event) => { execution.aspectRatio = event.target.value; save(); renderWorkspace(); });
+    appEl.querySelector("#generationQuality")?.addEventListener("change", (event) => { execution.quality = event.target.value; save(); });
+    appEl.querySelector("#generationCount")?.addEventListener("change", (event) => { execution.count = clamp(Number(event.target.value), 1, 4); save(); renderWorkspace(); });
+  }
+
+  function bindOutputPresets(project) {
+    appEl.querySelector("#representationPreset")?.addEventListener("change", (event) => { applyOutputPreset(project.representation, "representation", event.target.value); save("표현 프리셋을 적용했습니다."); renderWorkspace(); });
+    appEl.querySelector("#designStylePreset")?.addEventListener("change", (event) => { applyOutputPreset(project.representation, "design", event.target.value); save("디자인 스타일 프리셋을 적용했습니다."); renderWorkspace(); });
+    appEl.querySelector("#representationPresetStrength")?.addEventListener("input", (event) => { const selection = project.representation.global.output.representationPreset; selection.strength = Number(event.target.value); selection.source = "preset"; event.target.nextElementSibling.textContent = `강도 ${event.target.value}`; save(); });
+    appEl.querySelector("#designStylePresetStrength")?.addEventListener("input", (event) => { const selection = project.representation.global.output.designStylePreset; selection.strength = Number(event.target.value); selection.source = "preset"; event.target.nextElementSibling.textContent = `강도 ${event.target.value}`; save(); });
+    appEl.querySelector("#userExclusions")?.addEventListener("change", (event) => { const exclusions = project.representation.global.output.userExclusions; exclusions.value = event.target.value; exclusions.source = "user"; exclusions.mode = "controlled"; save(); renderWorkspace(); });
   }
 
   function readFiles(fileList, callback) {
@@ -735,7 +1039,7 @@
     appEl.querySelectorAll("[data-mask-tool]").forEach((button) => button.addEventListener("click", () => { maskRuntime.tool = button.dataset.maskTool; appEl.querySelectorAll("[data-mask-tool]").forEach((item) => item.classList.toggle("active", item === button)); }));
     appEl.querySelector('[data-action="clear-mask"]')?.addEventListener("click", () => ctx.clearRect(0, 0, canvas.width, canvas.height));
     appEl.querySelector('[data-action="new-region"]')?.addEventListener("click", () => { project.activeRegionId = null; save(); renderWorkspace(); });
-    appEl.querySelector('[data-action="toggle-mask"]')?.addEventListener("click", (event) => { maskRuntime.visible = !maskRuntime.visible; canvas.style.display = maskRuntime.visible ? "block" : "none"; event.currentTarget.textContent = `MASK ${maskRuntime.visible ? "VISIBLE" : "HIDDEN"}`; });
+    appEl.querySelector('[data-action="toggle-mask"]')?.addEventListener("click", (event) => { maskRuntime.visible = !maskRuntime.visible; canvas.style.display = maskRuntime.visible ? "block" : "none"; event.currentTarget.textContent = maskRuntime.visible ? "마스크 표시" : "마스크 숨김"; });
     appEl.querySelector("#brushSize")?.addEventListener("input", (event) => { maskRuntime.size = Number(event.target.value); });
     appEl.querySelector("#maskOpacity")?.addEventListener("input", (event) => { maskRuntime.opacity = Number(event.target.value) / 100; canvas.style.opacity = maskRuntime.opacity; });
     appEl.querySelector('[data-action="create-region"]')?.addEventListener("click", () => {
@@ -773,20 +1077,27 @@
   }
 
   async function generateNormal(project) {
-    const parent = project.experiments[0]?.id || null;
-    const experiment = await createExperiment(project, project.representation, project.experiments.length ? `Iteration ${project.experiments.length}` : "Baseline", parent);
-    project.experiments.unshift(experiment); project.selectedExperimentIds = [experiment.id, ...project.selectedExperimentIds].slice(0, 2); save("Generation snapshot을 저장했습니다."); renderWorkspace();
+    try {
+      resolveExecution(project, null, false); updateGenerationStage("COMPILING REPRESENTATION", "표현 상태를 모델 지시로 변환 중");
+      const parent = project.experiments[0]?.id || null;
+      const experiment = await createExperiment(project, project.representation, project.experiments.length ? `Iteration ${project.experiments.length}` : "Baseline", parent, null, true);
+      project.experiments.unshift(experiment); project.selectedExperimentIds = [experiment.id, ...project.selectedExperimentIds].slice(0, 2); generationRuntime.stage = null; save("Generation snapshot을 저장했습니다."); renderWorkspace();
+    } catch (error) { generationRuntime.stage = null; generationRuntime.error = { code: error.code || "UNKNOWN", message: error.message, details: error.details || null }; renderWorkspace(); }
   }
   async function generateRegion(project) {
     const region = project.representation.regions.find((item) => item.id === project.activeRegionId); if (!region) return;
-    const experiment = await createExperiment(project, project.representation, `Region Edit · ${region.name}`, project.experiments[0]?.id || null, region);
-    project.experiments.unshift(experiment); project.selectedExperimentIds = [experiment.id, ...project.selectedExperimentIds].slice(0, 2); save("Region edit snapshot을 저장했습니다."); renderWorkspace();
+    try {
+      resolveExecution(project, region, false); updateGenerationStage("COMPILING REGION", `${region.name} 로컬 상태`);
+      const experiment = await createExperiment(project, project.representation, `Region Edit · ${region.name}`, project.experiments[0]?.id || null, region, true);
+      project.experiments.unshift(experiment); project.selectedExperimentIds = [experiment.id, ...project.selectedExperimentIds].slice(0, 2); generationRuntime.stage = null; save("Region edit snapshot을 저장했습니다."); renderWorkspace();
+    } catch (error) { generationRuntime.stage = null; generationRuntime.error = { code: error.code || "UNKNOWN", message: error.message, details: error.details || null }; renderWorkspace(); }
   }
   async function runOfat(project, node) {
     const path = node.settings.variable, rawValues = node.settings.values.split(",").map((value) => value.trim()).filter(Boolean), base = clone(project.representation), baseAttr = pathGet(base, path);
     const values = rawValues.map((value) => typeof baseAttr.value === "number" ? Number(value) : value).filter((value) => typeof value !== "number" || Number.isFinite(value)); if (!values.length) return;
     const created = [];
-    for (const value of values) { const variant = clone(base), attribute = pathGet(variant, path); attribute.value = value; const experiment = await createExperiment(project, variant, `OFAT · ${path.split(".").pop()} ${value}`, project.experiments[0]?.id || null); experiment.changedVariables = [path]; created.push(experiment); }
+    try { resolveExecution(project, null, false); } catch (error) { generationRuntime.error = { code: error.code || "UNKNOWN", message: error.message, details: error.details || null }; renderWorkspace(); return; }
+    for (const value of values) { const variant = clone(base), attribute = pathGet(variant, path); attribute.value = value; const experiment = await createExperiment(project, variant, `OFAT · ${path.split(".").pop()} ${value}`, project.experiments[0]?.id || null, null, true); experiment.changedVariables = [path]; created.push(experiment); }
     project.experiments.unshift(...created.reverse()); project.selectedExperimentIds = created.slice(0, 2).map((item) => item.id); save(`OFAT ${values.length}개 snapshot을 생성했습니다.`); renderWorkspace();
   }
   async function runAlternatives(project, node) {
@@ -797,7 +1108,8 @@
       { palette: "high contrast monochrome", primary: "blackened timber", temperature: 3500, atmosphere: "graphic editorial" },
     ];
     const created = [];
-    for (let i = 0; i < count; i++) { const variant = clone(project.representation), spec = variants[i % variants.length]; Object.assign(variant.global.appearance.palette, { value: spec.palette, source: "system", mode: "controlled" }); Object.assign(variant.global.material.primary, { value: spec.primary, source: "system", mode: "controlled" }); Object.assign(variant.global.lighting.colorTemperatureK, { value: spec.temperature, source: "system", mode: "controlled" }); Object.assign(variant.global.appearance.atmosphere, { value: spec.atmosphere, source: "system", mode: "controlled" }); created.push(await createExperiment(project, variant, `Alternative ${i + 1}`, project.experiments[0]?.id || null)); }
+    try { resolveExecution(project, null, false); } catch (error) { generationRuntime.error = { code: error.code || "UNKNOWN", message: error.message, details: error.details || null }; renderWorkspace(); return; }
+    for (let i = 0; i < count; i++) { const variant = clone(project.representation), spec = variants[i % variants.length]; Object.assign(variant.global.appearance.palette, { value: spec.palette, source: "system", mode: "controlled" }); Object.assign(variant.global.material.primary, { value: spec.primary, source: "system", mode: "controlled" }); Object.assign(variant.global.lighting.colorTemperatureK, { value: spec.temperature, source: "system", mode: "controlled" }); Object.assign(variant.global.appearance.atmosphere, { value: spec.atmosphere, source: "system", mode: "controlled" }); created.push(await createExperiment(project, variant, `Alternative ${i + 1}`, project.experiments[0]?.id || null, null, true)); }
     project.experiments.unshift(...created.reverse()); project.selectedExperimentIds = created.slice(0, 2).map((item) => item.id); save("의도적 multi-variable alternatives를 생성했습니다."); renderWorkspace();
   }
 
@@ -807,7 +1119,7 @@
       project.selectedExperimentIds = project.selectedExperimentIds.includes(id) ? project.selectedExperimentIds.filter((item) => item !== id) : [...project.selectedExperimentIds.slice(-1), id];
       save(); renderWorkspace();
     }));
-    appEl.querySelectorAll("[data-load-experiment]").forEach((button) => button.addEventListener("click", () => { const experiment = project.experiments.find((item) => item.id === button.dataset.loadExperiment); if (!experiment) return; project.representation = clone(experiment.representationState); save("Snapshot State를 작업 상태로 불러왔습니다."); renderWorkspace(); }));
+    appEl.querySelectorAll("[data-load-experiment]").forEach((button) => button.addEventListener("click", () => { const experiment = project.experiments.find((item) => item.id === button.dataset.loadExperiment); if (!experiment) return; project.representation = ensureOutputState(clone(experiment.representationState)); save("스냅샷 상태를 작업 상태로 불러왔습니다."); renderWorkspace(); }));
     appEl.querySelectorAll("[data-delete-experiment]").forEach((button) => button.addEventListener("click", () => { const id = button.dataset.deleteExperiment; project.experiments = project.experiments.filter((item) => item.id !== id); project.selectedExperimentIds = project.selectedExperimentIds.filter((item) => item !== id); save("Snapshot을 삭제했습니다."); renderWorkspace(); }));
     appEl.querySelectorAll("[data-eval-id]").forEach((select) => select.addEventListener("change", () => { const experiment = project.experiments.find((item) => item.id === select.dataset.evalId); experiment.evaluation[select.dataset.evalKey] = Number(select.value); save(); }));
     appEl.querySelectorAll("[data-failure-id]").forEach((select) => select.addEventListener("change", () => { const experiment = project.experiments.find((item) => item.id === select.dataset.failureId); experiment.evaluation.failureCause = select.value === "Failure cause…" ? "" : select.value; save(); }));
@@ -817,8 +1129,11 @@
   globalThis.__VRL_TEST__ = {
     templateConfigs, moduleConfigs, createProject, compileGlobal, compileRegionEdit,
     diffRepresentations, diffPrompts, horizontalFovDeg, focalFromFov,
-    blankRegion, createExperiment, clone,
+    blankRegion, createExperiment, clone, ensureOutputState, applyOutputPreset,
+    compileOutput, mergeExclusions, REPRESENTATION_PRESETS, DESIGN_STYLE_PRESETS,
+    ensureExecutionState, routingCapability, resolveExecution,
   };
   load();
   render();
+  refreshProviderStatuses(true);
 })();

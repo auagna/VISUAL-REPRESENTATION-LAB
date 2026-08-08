@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: visual-representation-lab
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: echo "No build required"
+    startCommand: npm run standalone
+    healthCheckPath: /api/ai/status
+    autoDeployTrigger: commit
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: NODE_VERSION
+        value: 22.17.1
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
