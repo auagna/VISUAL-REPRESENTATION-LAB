@@ -26,6 +26,12 @@ const projectB = vrl.createProject("interior-refine");
 projectA.representation.global.camera.focalLengthMm.value = 50;
 assert.equal(projectB.representation.global.camera.focalLengthMm.value, 35, "template projects are independent clones");
 
+const graphImageNode = projectB.graph.nodes.find((node) => ["imageInput", "image"].includes(node.type));
+projectB.selectedNodeId = graphImageNode.id;
+const graphImageInspector = vrl.renderInspector(projectB);
+assert.ok(graphImageInspector.includes('id="sourceImageInput"'), "Graph v2 image source exposes the file picker");
+assert.ok(graphImageInspector.includes('aria-label="소스 이미지 선택"'), "Graph v2 image picker has an accessible label");
+
 const camera = projectB.representation.global.camera;
 const fov = vrl.horizontalFovDeg(camera);
 assert.ok(Math.abs(vrl.focalFromFov(camera.sensor.value, fov) - camera.focalLengthMm.value) < 0.2, "FOV round-trip remains physically consistent");
