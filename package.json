@@ -7,7 +7,9 @@
     "standalone": "node server/server.mjs",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:standalone": "node standalone/smoke-test.js",
+    "test:graph": "node standalone/graph-v2-test.js"
   },
   "dependencies": {
     "next": "15.4.6",

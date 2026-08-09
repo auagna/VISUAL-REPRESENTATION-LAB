@@ -63,6 +63,21 @@
     Output: ["compiler", "generator"],
   };
 
+  if (globalThis.VRL_GRAPH) {
+    Object.entries(globalThis.VRL_GRAPH.REGISTRY).forEach(([type, definition]) => {
+      NODE_DEFS[type] ||= {
+        label: definition.label,
+        category: definition.category,
+        inputs: definition.inputs.map((item) => item.label),
+        outputs: definition.outputs.map((item) => item.label),
+      };
+    });
+    NODE_LIBRARY.INPUT = ["number", "text", "boolean", "enum", "image", "reference", "list"];
+    NODE_LIBRARY.REPRESENTATION = ["camera", "lighting", "material", "representation"];
+    NODE_LIBRARY.LOGIC = ["switch", "merge", "override", "iterate", "lock", "styleMix"];
+    NODE_LIBRARY.OUTPUT = ["compile", "generate", "compare"];
+  }
+
   const CAMERA_PRESETS = {
     "Interior 24 Wide": { focalLengthMm: 24, sensor: "Full Frame", cameraHeightMm: 1500, pitchDeg: 0, perspectiveCorrection: true },
     "Interior 35 Natural": { focalLengthMm: 35, sensor: "Full Frame", cameraHeightMm: 1500, pitchDeg: 0, perspectiveCorrection: true },
@@ -241,21 +256,26 @@
 
   function createProject(templateId = null, name = null) {
     const template = templateConfigs.find((item) => item.id === templateId);
-    const graph = makeGraph(template ? template.nodes : ["imageInput", "representation", "compiler", "generator", "compare"]);
+    const initialRepresentation = applyTemplateState(defaultRepresentation(), templateId);
+    const graph = globalThis.VRL_GRAPH
+      ? globalThis.VRL_GRAPH.createTemplateGraph(templateId || "interior-refine", initialRepresentation)
+      : makeGraph(template ? template.nodes : ["imageInput", "representation", "compiler", "generator", "compare"]);
     const preferredNode = graph.nodes.find((node) => node.type === "camera")
       || graph.nodes.find((node) => node.type === "lighting")
       || graph.nodes.find((node) => node.type === "regionMask")
       || graph.nodes.find((node) => node.type === "representation")
       || graph.nodes[0];
-    return {
+    const project = {
       id: uid("project"), name: name || (template ? `${template.title} 프로젝트` : "빈 프로젝트"), templateId,
       createdAt: now(), updatedAt: now(), sourceImage: null, referenceImages: [],
-      representation: applyTemplateState(defaultRepresentation(), templateId), graph,
+      representation: initialRepresentation, graph,
       experiments: [], selectedExperimentIds: [], selectedNodeId: preferredNode?.id || null,
-      selectedNodeIds: [], activeRegionId: null, workspaceMode: "image", debug: false,
+      selectedNodeIds: [], activeRegionId: null, workspaceMode: globalThis.VRL_GRAPH ? "system" : "image", debug: false,
       execution: globalThis.VRL_AI?.defaultProjectExecution?.() || { useGlobalDefaults: true, generationModel: null, editModel: null, referenceModel: null, generatorOverrides: {}, aspectRatio: "4:3", quality: "high", count: 1 },
       engineSetupDismissed: false,
     };
+    if (globalThis.VRL_GRAPH) syncGraphState(project);
+    return project;
   }
 
   let store = { projects: [], activeProjectId: null };
@@ -278,7 +298,7 @@
     project.execution.count ||= 1;
     return project.execution;
   }
-  function selectedGenerator(project) { return project.graph.nodes.find((node) => node.id === project.selectedNodeId && node.type === "generator") || project.graph.nodes.find((node) => node.type === "generator") || null; }
+  function selectedGenerator(project) { return project.graph.nodes.find((node) => node.id === project.selectedNodeId && ["generator", "generate"].includes(node.type)) || project.graph.nodes.find((node) => ["generator", "generate"].includes(node.type)) || null; }
   function providerName(id) { return globalThis.VRL_AI?.providers?.find((provider) => provider.id === id)?.name || String(id || "—").toUpperCase(); }
   function modelName(id) { return globalThis.VRL_AI?.modelById?.[id]?.name || id || "모델 미선택"; }
   function effectiveSelection(project, capability = "generation", nodeId = null) { return globalThis.VRL_AI?.selectionFor?.(capability, aiSettings, ensureExecutionState(project), nodeId) || null; }
@@ -298,8 +318,12 @@
       if (project.name === "Blank Project") project.name = "빈 프로젝트";
       ensureOutputState(project.representation);
       ensureExecutionState(project);
+      if (globalThis.VRL_GRAPH) {
+        globalThis.VRL_GRAPH.migrateGraphV1(project);
+        syncGraphState(project);
+      }
       if (project.workspaceMode === "graph") project.workspaceMode = "system";
-      if (!["image", "system", "compare", "region", "design", "models"].includes(project.workspaceMode)) project.workspaceMode = "image";
+      if (!["image", "system", "compare", "region", "design", "models"].includes(project.workspaceMode)) project.workspaceMode = globalThis.VRL_GRAPH ? "system" : "image";
       project.graph?.nodes?.forEach((node) => { if (NODE_DEFS[node.type]) node.label = NODE_DEFS[node.type].label; if (oldModuleTitles[node.moduleTitle]) node.moduleTitle = oldModuleTitles[node.moduleTitle]; });
     });
     customModules.forEach((module) => { if (oldModuleTitles[module.title]) module.title = oldModuleTitles[module.title]; module.nodes?.forEach((node) => { if (NODE_DEFS[node.type]) node.label = NODE_DEFS[node.type].label; }); });
@@ -366,13 +390,16 @@
     ensureOutputState(representation);
     const g = representation.global, output = g.output;
     const representationPreset = representationPresetById[output.representationPreset.value] || REPRESENTATION_PRESETS[0];
-    const designPreset = designStylePresetById[output.designStylePreset.value] || DESIGN_STYLE_PRESETS[0];
+    const designValue = output.designStylePreset.value;
+    const mixedStyles = designValue?.kind === "style-mix" ? designValue.styles.map((id, index) => ({ preset: designStylePresetById[id], weight: designValue.weights?.[index] ?? 0.5 })).filter((item) => item.preset) : [];
+    const designPreset = typeof designValue === "string" ? (designStylePresetById[designValue] || DESIGN_STYLE_PRESETS[0]) : DESIGN_STYLE_PRESETS[0];
     const sections = [];
     const enabledText = (record) => Object.entries(record).filter(([, a]) => a.enabled).map(([key, a]) => `${key}: ${a.value} (${intensity(a.strength)} emphasis; source ${a.source})`).join("; ");
     if (g.content.subject.enabled) sections.push({ id: "subject", label: "SUBJECT / CONTENT", text: `${g.content.subject.value}.` });
     sections.push({ id: "spatial-preservation", label: "SPATIAL PRESERVATION", text: enabledText({ geometry: g.content.geometry, majorLayout: g.content.majorLayout, composition: g.content.composition, furniture: g.content.furniture }) + "." });
     sections.push({ id: "representation-preset", label: "REPRESENTATION PRESET", text: compilePresetBlock(representationPreset, output.representationPreset, g) });
-    if (designPreset.id !== "none") sections.push({ id: "design-style-preset", label: "DESIGN STYLE PRESET", text: compilePresetBlock(designPreset, output.designStylePreset, g, true) });
+    if (mixedStyles.length) sections.push({ id: "design-style-mix", label: "DESIGN STYLE MIX", text: `Explicit Style Mix. ${mixedStyles.map(({ preset, weight }) => `${preset.name}: ${Math.round(weight * 100)}%. ${compilePresetBlock(preset, { ...output.designStylePreset, value: preset.id, strength: Math.round(weight * 100) }, g, true)}`).join(" ")}` });
+    else if (designPreset.id !== "none") sections.push({ id: "design-style-preset", label: "DESIGN STYLE PRESET", text: compilePresetBlock(designPreset, output.designStylePreset, g, true) });
     sections.push({ id: "camera", label: "CAMERA", text: translateCamera(g.camera) });
     sections.push({ id: "lighting", label: "LIGHTING", text: translateLighting(g.lighting) });
     sections.push({ id: "materials", label: "MATERIALS", text: enabledText(g.material) + ". Explicit controlled user materials override all preset material hints." });
@@ -382,7 +409,7 @@
       const attrs = Object.entries(region.attributes).filter(([, a]) => a?.enabled).map(([key, a]) => `${key}: ${a.value} (source ${a.source})`).join("; ");
       const preserved = Object.entries(region.preserve).filter(([, value]) => value).map(([key]) => key).join(", ");
       sections.push({ id: `region-${region.id}-target`, label: "REGION TARGET", text: `${region.name} inside the selected mask.` });
-      sections.push({ id: `region-${region.id}-change`, label: "REGION CHANGE", text: `${region.operation.toUpperCase()}: ${region.instruction || attrs || "apply the explicitly controlled regional attributes"}. Inherit the global ${representationPreset.name} representation and ${designPreset.name} design language.` });
+      sections.push({ id: `region-${region.id}-change`, label: "REGION CHANGE", text: `${region.operation.toUpperCase()}: ${region.instruction || attrs || "apply the explicitly controlled regional attributes"}. Inherit the global ${representationPreset.name} representation and ${mixedStyles.length ? mixedStyles.map((item) => item.preset.name).join(" + ") : designPreset.name} design language.` });
       sections.push({ id: `region-${region.id}-preserve`, label: "REGION PRESERVE", text: `Preserve exact ${preserved || "surrounding context"}; preserve global output presets, camera and room perspective.` });
       sections.push({ id: `region-${region.id}-outside`, label: "OUTSIDE MASK", text: "Keep all unselected pixels and scene elements visually unchanged." });
     });
@@ -390,12 +417,35 @@
     walkAttributes(representation.global, (path, a) => { if (a.enabled && a.mode === "locked") locked.push(`${path} (${a.value})`); });
     if (locked.length) sections.push({ id: "preservation-constraints", label: "PRESERVATION CONSTRAINTS", text: `Preserve exactly: ${locked.join(", ")}.` });
     const userExclusions = output.userExclusions.value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
-    const exclusions = mergeExclusions(representationPreset.exclusions || [], designPreset.exclusions || [], userExclusions, ["unrepresented objects or styles", "generic aesthetic enhancement terms"]);
+    const exclusions = mergeExclusions(representationPreset.exclusions || [], mixedStyles.length ? mixedStyles.flatMap((item) => item.preset.exclusions || []) : (designPreset.exclusions || []), userExclusions, ["unrepresented objects or styles", "generic aesthetic enhancement terms"]);
     sections.push({ id: "exclusions", label: "EXCLUSIONS", text: `Avoid: ${exclusions.join("; ")}.` });
     return { sections: sections.filter((section) => section.text), prompt: sections.filter((section) => section.text).map((section) => `${section.label}:\n${section.text}`).join("\n\n") };
   }
   function compileGlobal(representation) { return compileOutput(representation); }
   function compileRegionEdit(representation, region) { return region ? compileOutput(representation, region) : null; }
+
+  function evaluateProjectGraph(project, options = {}) {
+    if (!globalThis.VRL_GRAPH || project.graph?.version !== 2) return null;
+    project.graph.settings ||= {};
+    project.graph.settings.baseRepresentation = clone(project.representation);
+    const imageNode = project.graph.nodes.find((node) => node.type === "image");
+    if (imageNode) imageNode.settings.value = project.sourceImage;
+    return globalThis.VRL_GRAPH.evaluateProjectGraph(project, { compile: compileGlobal, ...options });
+  }
+
+  function syncGraphState(project, options = {}) {
+    const evaluation = evaluateProjectGraph(project, options);
+    if (evaluation?.representationState) project.representation = ensureOutputState(clone(evaluation.representationState));
+    project.graphEvaluation = evaluation ? {
+      graphVersion: evaluation.graphVersion,
+      generatorNodeId: evaluation.generatorNodeId,
+      diagnostics: clone(evaluation.diagnostics),
+      provenance: clone(evaluation.provenance),
+      compiledInstruction: clone(evaluation.compiledInstruction),
+      variantCount: evaluation.variants.length,
+    } : null;
+    return evaluation;
+  }
 
   function walkAttributes(object, callback, prefix = "") {
     Object.entries(object).forEach(([key, value]) => {
@@ -476,19 +526,20 @@
     if (element) element.innerHTML = `<b>${esc(stage)}</b><span>${esc(detail)}</span><i></i>`;
   }
 
-  async function createExperiment(project, representation, name, parentExperimentId = null, region = null, strictRouting = false) {
-    const instruction = region ? compileRegionEdit(representation, region) : compileGlobal(representation);
+  async function createExperiment(project, representation, name, parentExperimentId = null, region = null, strictRouting = false, graphEvaluation = null) {
+    const canonicalRepresentation = graphEvaluation?.representationState || representation;
+    const instruction = region ? compileRegionEdit(canonicalRepresentation, region) : (graphEvaluation?.compiledInstruction || compileGlobal(canonicalRepresentation));
     const routed = resolveExecution(project, region, !strictRouting), operation = region ? "edit" : "generation";
     updateGenerationStage("ROUTING MODEL", `${providerName(routed.provider.id)} / ${routed.model.name}`);
     let images;
     if (routed.provider.id === "mock") {
       const provider = region ? new MockImageEditProvider() : new MockImageProvider();
-      images = region ? await provider.edit({ sourceImage: project.sourceImage, mask: region.maskDataUrl, representation, region, instruction, references: region.referenceImages }) : await provider.generate({ representation, instruction });
+      images = region ? await provider.edit({ sourceImage: project.sourceImage, mask: region.maskDataUrl, representation: canonicalRepresentation, region, instruction, references: region.referenceImages }) : await provider.generate({ representation: canonicalRepresentation, instruction });
       images = images.map((image) => ({ ...image, mimeType: "image/svg+xml", providerId: "mock", modelId: "mock-image-v1", createdAt: now() }));
     } else {
       updateGenerationStage("GENERATING", `${providerName(routed.provider.id)} / ${routed.model.name}`);
       const request = {
-        representationState: representation, compiledInstruction: instruction.prompt,
+        representationState: canonicalRepresentation, compiledInstruction: instruction.prompt,
         sourceImage: imageAsset(project.sourceImage, "source"), mask: imageAsset(region?.maskDataUrl, "mask"),
         references: (region?.referenceImages || project.referenceImages).map((value, index) => imageAsset(value, `reference-${index + 1}`)).filter(Boolean),
         aspectRatio: ensureExecutionState(project).aspectRatio, quality: ensureExecutionState(project).quality, count: ensureExecutionState(project).count,
@@ -499,12 +550,15 @@
       if (!images.length) throw new globalThis.VRL_AI.RouterError("UNKNOWN", "Provider returned no image output.");
     }
     const previous = parentExperimentId ? project.experiments.find((item) => item.id === parentExperimentId) : project.experiments[0];
-    const changed = previous ? diffRepresentations(previous.representationState, representation).map((item) => item.path) : [];
+    const delta = previous ? diffRepresentations(previous.representationState, canonicalRepresentation) : [];
+    const changed = delta.map((item) => item.path);
     return {
       id: uid("experiment"), name, timestamp: now(), parentExperimentId: previous?.id || null,
       sourceImages: { base: project.sourceImage, references: clone(project.referenceImages), mask: region?.maskDataUrl || null },
-      representationState: clone(representation), regionStates: clone(representation.regions), graphSnapshot: clone(project.graph),
-      changedVariables: changed, compiledInstruction: instruction, provider: routed.provider.id, providerId: routed.provider.id, modelId: routed.model.id,
+      representationState: clone(canonicalRepresentation), regionStates: clone(canonicalRepresentation.regions), graphSnapshot: clone(project.graph),
+      graphProvenance: clone(graphEvaluation?.provenance || {}), generatorNodeId: graphEvaluation?.generatorNodeId || selectedGenerator(project)?.id || null,
+      changedVariables: changed, changedValues: delta.map((item) => ({ ...item, source: clone(graphEvaluation?.provenance?.[item.path] || null) })),
+      compiledInstruction: instruction, executionState: clone(ensureExecutionState(project)), provider: routed.provider.id, providerId: routed.provider.id, modelId: routed.model.id,
       providerModelVersion: routed.model.id === "gpt-image-2" ? "gpt-image-2" : null,
       generationSettings: { operation, capability: routed.capability, aspectRatio: ensureExecutionState(project).aspectRatio, quality: ensureExecutionState(project).quality, count: ensureExecutionState(project).count },
       generatedImages: images,
@@ -518,12 +572,12 @@
 
   function templateRail(templateId) {
     const rails = {
-      "interior-refine": ["35 mm", "3000 K", "Geometry locked"],
-      "alt-exploration": ["BASE", "A", "B", "C"],
-      "furniture-swap": ["REGION", "MATERIAL", "PRESERVE"],
-      "camera-study": ["24", "35", "50", "85 mm"],
-      "lighting-study": ["2700", "3000", "4000", "5500 K"],
-      "reference-mix": ["REF", "ATTRIBUTE", "MERGED STATE"],
+      "interior-refine": ["IMAGE", "CAMERA", "LIGHT", "REP", "GENERATE", "COMPARE"],
+      "alt-exploration": ["BASE", "ALT", "GENERATE", "COMPARE"],
+      "furniture-swap": ["IMAGE", "MASK", "REGION", "GENERATE", "COMPARE"],
+      "camera-study": ["LIST", "ITERATE", "CAMERA", "GENERATE", "COMPARE"],
+      "lighting-study": ["LIST", "ITERATE", "LIGHT", "GENERATE", "COMPARE"],
+      "reference-mix": ["REF", "ANALYZE", "SELECT", "MERGE"],
     };
     return rails[templateId] || ["STATE A", "STATE B"];
   }
@@ -582,6 +636,7 @@
   function renderWorkspace() {
     const project = activeProject();
     if (!project) { route = "landing"; render(); return; }
+    if (project.graph?.version === 2) syncGraphState(project);
     ensureExecutionState(project); const mode = project.workspaceMode || "image"; const selection = effectiveSelection(project, "generation", selectedGenerator(project)?.id);
     const inspector = mode === "compare" ? renderDeltaInspector(project) : mode === "models" ? renderProjectRoutingInspector(project) : mode === "design" ? renderDesignSystemInspector(project) : renderInspector(project);
     const topbar = mode === "region" ? `<header class="topbar region-topbar"><button class="text-action" data-view-mode="image">← 이미지</button><div><span class="eyebrow">REGION EDIT</span><b>${esc(project.representation.regions.find((region) => region.id === project.activeRegionId)?.name || "새 영역")}</b></div><button class="btn accent small" data-action="image-done">완료</button></header>` : `<header class="topbar"><div class="topbar-left"><button class="vrl-mark" data-action="home">VRL</button><input class="project-name" id="projectName" value="${esc(project.name)}" aria-label="프로젝트 이름"><span class="project-context">${project.templateId ? esc(templateConfigs.find((t) => t.id === project.templateId)?.title || "워크플로") : "자유 구성"}</span></div><nav class="mode-nav" aria-label="작업 공간 모드">${[["image","IMAGE"],["system","SYSTEM"],["compare","COMPARE"]].map(([id,label]) => `<button data-view-mode="${id}" class="${mode === id ? "active" : ""}">${label}</button>`).join("")}</nav><div class="topbar-right"><button class="model-status ${selection?.providerId === "mock" ? "offline" : ""}" data-action="manage-models"><span>${selection ? providerName(selection.providerId) : "AI MODELS"}</span><b>${selection ? modelName(selection.modelId) : "연결 필요"}</b></button><button class="btn accent generate-button" data-action="generate">생성 →</button></div></header>`;
@@ -597,7 +652,7 @@
     if (project.workspaceMode === "region") return renderRegionWorkspace(project);
     if (project.workspaceMode === "models") return renderAIModels(project);
     if (project.workspaceMode === "design") return renderDesignSystemPage();
-    return `<section class="graph-shell"><div class="graph-canvas" id="graphCanvas"><div class="graph-toolbar"><button class="btn secondary small" data-action="add-default-node">＋ 노드</button><button class="btn secondary small" data-action="add-camera-module">＋ 카메라 연구</button><button class="text-action" data-view-mode="design">DESIGN SYSTEM</button><span class="mono">${project.graph.nodes.length} nodes · ${project.graph.edges.length} relations</span></div>${renderGraph(project)}</div></section>`;
+    return `<section class="graph-shell"><div class="graph-canvas" id="graphCanvas"><div class="graph-toolbar">${project.graphStack?.length ? `<button class="text-action" data-action="close-cluster">← 상위 그래프</button>` : ""}<button class="btn secondary small" data-action="add-default-node">＋ 노드</button><button class="btn secondary small" data-action="add-camera-module">＋ 카메라 연구</button><button class="text-action" data-view-mode="design">DESIGN SYSTEM</button><span class="mono">GRAPH v${project.graph.version || 1} · ${project.graph.nodes.length} nodes · ${project.graph.edges.length} wires</span></div>${renderGraph(project)}</div></section>`;
   }
 
   function renderImageWorkspace(project) {
@@ -642,10 +697,11 @@
   }
 
   function renderDeltaInspector(project) {
-    const study = activeStudy(project), compared = project.selectedExperimentIds.map((id) => project.experiments.find((item) => item.id === id)).filter(Boolean);
+    const study = activeStudy(project), compared = project.selectedExperimentIds.map((id) => project.experiments.find((item) => item.id === id)).filter(Boolean).sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     let before = study.values[0], after = study.values[1], representationChanges = [];
     if (compared.length === 2) { before = pathGet(compared[0].representationState, study.path)?.value ?? before; after = pathGet(compared[1].representationState, study.path)?.value ?? after; representationChanges = diffRepresentations(compared[0].representationState, compared[1].representationState); }
-    return `<div class="panel-head"><span class="eyebrow">STATE DELTA</span><h2 class="inspector-title">${esc(study.title)}</h2></div><div class="delta-inspector"><div class="eyebrow">CHANGED</div><div class="delta-value"><span>${esc(before)} <small>${study.unit}</small></span><i>→</i><b>${esc(after)} <small>${study.unit}</small></b></div><p>Δ ${esc(study.label)} ONLY</p><div class="eyebrow">PRESERVED</div>${study.preserved.map((item) => `<div class="delta-row"><span>${esc(item)}</span><b>■ 잠금</b></div>`).join("")}<details><summary>전체 상태 보기</summary><pre class="json">${esc(JSON.stringify(representationChanges, null, 2))}</pre></details></div>`;
+    const source = compared[1]?.graphProvenance?.[study.path], sourceNode = source ? compared[1]?.graphSnapshot?.nodes?.find((node) => node.id === source.sourceNodeId) : null;
+    return `<div class="panel-head"><span class="eyebrow">STATE DELTA</span><h2 class="inspector-title">${esc(study.title)}</h2></div><div class="delta-inspector"><div class="eyebrow">CHANGED</div><div class="delta-value" data-delta-path="${esc(study.path)}"><span>${esc(before)} <small>${study.unit}</small></span><i>→</i><b>${esc(after)} <small>${study.unit}</small></b></div><p>Δ ${esc(study.label)} ONLY</p>${source ? `<div class="execution-row"><span>SOURCE</span><b>${esc(sourceNode?.label || source.sourceNodeId || "graph")}</b></div>` : ""}<div class="eyebrow">PRESERVED</div>${study.preserved.map((item) => `<div class="delta-row"><span>${esc(item)}</span><b>■ 잠금</b></div>`).join("")}<details><summary>전체 상태 보기</summary><pre class="json">${esc(JSON.stringify(representationChanges, null, 2))}</pre></details></div>`;
   }
   function renderProjectRoutingInspector(project) {
     const execution = ensureExecutionState(project), generation = effectiveSelection(project, "generation"), edit = effectiveSelection(project, "maskEditing");
@@ -668,7 +724,48 @@
     return { x: Math.min(...xs) - 22, y: Math.min(...ys) - 30, width: Math.max(...xs) - Math.min(...xs) + 228, height: Math.max(...ys) - Math.min(...ys) + 148 };
   }
 
+  function graphPortY(node, direction, portId) {
+    if (node.kind === "cluster") return node.y + 76;
+    const ports = globalThis.VRL_GRAPH.getPorts(node, direction);
+    const index = Math.max(0, ports.findIndex((item) => item.id === portId));
+    return node.y + 78 + index * 25;
+  }
+
+  function graphPortX(node, direction) { return node.x + (direction === "outputs" ? 224 : 0); }
+
+  function renderTypedPorts(node, direction) {
+    if (node.kind === "cluster") return "";
+    return globalThis.VRL_GRAPH.getPorts(node, direction).map((port) => `<button class="typed-port ${direction === "inputs" ? "input" : "output"}" data-port-node-id="${node.id}" data-port-id="${port.id}" data-port-direction="${direction === "inputs" ? "input" : "output"}" data-value-type="${port.type}" title="${esc(port.type)}${port.domain ? ` · ${esc(port.domain)}` : ""}"><i>${globalThis.VRL_GRAPH.PORT_SYMBOLS[port.type] || "○"}</i><span>${esc(port.label)}</span>${port.required ? `<b>REQ</b>` : ""}</button>`).join("");
+  }
+
+  function enumOptionLabel(node, value) {
+    if (node.settings.domain === "RepresentationMode") return representationPresetById[value]?.nameKo || value;
+    if (node.settings.domain === "DesignStyle") return designStylePresetById[value]?.nameKo || value;
+    return value;
+  }
+
+  function renderParameterNode(node) {
+    const value = node.settings.value, unit = node.settings.unit || "";
+    if (node.type === "number") return `<div class="parameter-editor" data-parameter-node="${node.id}"><div class="parameter-value"><input data-parameter-editor="${node.id}" type="number" min="${node.settings.min ?? ""}" max="${node.settings.max ?? ""}" step="${node.settings.step ?? 1}" value="${esc(value)}"><span>${esc(unit)}</span></div><div class="parameter-rail"><span>${node.settings.min ?? ""}</span><input data-parameter-editor="${node.id}" type="range" min="${node.settings.min ?? 0}" max="${node.settings.max ?? 100}" step="${node.settings.step ?? 1}" value="${esc(value)}"><span>${node.settings.max ?? ""}</span></div></div>`;
+    if (node.type === "enum") return `<select class="parameter-select" data-parameter-editor="${node.id}">${(node.settings.options || []).map((option) => `<option value="${esc(option)}" ${option === value ? "selected" : ""}>${esc(enumOptionLabel(node, option))}</option>`).join("")}</select>`;
+    if (node.type === "list") return `<label class="list-editor"><span>∷ ${Array.isArray(value) ? value.length : 0} ITEMS</span><input data-parameter-editor="${node.id}" value="${esc((value || []).join(", "))}"><b>[${esc((value || []).join(", "))}] ${esc(unit)}</b></label>`;
+    if (node.type === "boolean") return `<label class="boolean-editor"><input data-parameter-editor="${node.id}" type="checkbox" ${value ? "checked" : ""}><span>${value ? "TRUE" : "FALSE"}</span></label>`;
+    if (node.type === "image") return `<div class="asset-node-state"><b>${value ? "IMAGE ATTACHED" : "IMAGE SOURCE"}</b><span>${value ? "graph asset" : "mock-ready · add in inspector"}</span></div>`;
+    return `<input class="parameter-select" data-parameter-editor="${node.id}" value="${esc(value || "")}">`;
+  }
+
+  function renderGraphV2(project) {
+    const edges = `<svg class="edge-layer typed-edges" viewBox="0 0 1800 1150" preserveAspectRatio="none">${project.graph.edges.map((candidate) => { const edge = globalThis.VRL_GRAPH.normalizedEdge(candidate), a = project.graph.nodes.find((node) => node.id === edge.source.nodeId), b = project.graph.nodes.find((node) => node.id === edge.target.nodeId); if (!a || !b) return ""; const x1 = graphPortX(a, "outputs"), y1 = graphPortY(a, "outputs", edge.source.portId), x2 = graphPortX(b, "inputs"), y2 = graphPortY(b, "inputs", edge.target.portId), bend = Math.max(42, Math.abs(x2 - x1) * .42); return `<path class="edge typed" data-from-node="${a.id}" data-from-port="${edge.source.portId}" data-to-node="${b.id}" data-to-port="${edge.target.portId}" d="M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}"/>`; }).join("")}</svg>`;
+    const nodes = project.graph.nodes.map((node) => {
+      if (node.kind === "cluster") return `<article class="node typed-node cluster-node ${node.id === project.selectedNodeId ? "active" : ""}" data-node-id="${node.id}" data-node-kind="cluster" data-cluster-type="${esc(node.settings.clusterType)}" style="left:${node.x}px;top:${node.y}px"><div class="node-head"><span class="node-kind">CLUSTER</span><span class="node-title">${esc(node.label)}</span></div><div class="cluster-grammar">LIST → ITERATE → ${node.settings.clusterType === "camera-study" ? "CAMERA OVERRIDE" : "LIGHTING OVERRIDE"} → GENERATE → COMPARE</div><div class="cluster-values">${esc(node.settings.subgraph?.nodes.find((item) => item.type === "list")?.settings.value?.join(" / ") || "")}</div><button class="text-action" data-action="open-cluster" data-cluster-id="${node.id}">내부 그래프 열기 →</button></article>`;
+      const inputs = globalThis.VRL_GRAPH.getPorts(node, "inputs"), outputs = globalThis.VRL_GRAPH.getPorts(node, "outputs");
+      return `<article class="node typed-node ${node.kind === "parameter" ? "parameter-node" : "component-node"} ${node.id === project.selectedNodeId ? "active" : ""} ${project.selectedNodeIds.includes(node.id) ? "selected" : ""}" data-node-id="${node.id}" data-node-kind="${node.kind}" data-node-type="${node.type}" data-semantic-key="${esc(node.settings.semanticPath || "")}" style="left:${node.x}px;top:${node.y}px"><div class="node-head"><input class="node-check" type="checkbox" ${project.selectedNodeIds.includes(node.id) ? "checked" : ""}><span class="node-kind">${esc(node.kind === "parameter" ? (node.settings.valueType || node.type).toUpperCase() : (NODE_DEFS[node.type]?.category || "COMPONENT").toUpperCase())}</span><span class="node-title">${esc(node.label)}</span></div><div class="typed-node-grid"><div class="typed-port-list inputs">${renderTypedPorts(node, "inputs")}</div><div class="node-body">${node.kind === "parameter" ? renderParameterNode(node) : nodeSummary(project, node)}</div><div class="typed-port-list outputs">${renderTypedPorts(node, "outputs")}</div></div><div class="node-contract">${inputs.length} IN · ${outputs.length} OUT</div></article>`;
+    }).join("");
+    return `<div class="graph-v2-label"><b>REPRESENTATION DATAFLOW</b><span>CONNECTED INPUT &gt; COMPONENT DEFAULT</span></div>${edges}${nodes}`;
+  }
+
   function renderGraph(project) {
+    if (project.graph?.version === 2 && globalThis.VRL_GRAPH) return renderGraphV2(project);
     const modules = [...new Set(project.graph.nodes.map((node) => node.moduleId).filter(Boolean))];
     const groups = modules.map((moduleId) => { const bounds = moduleBounds(project, moduleId); const title = project.graph.nodes.find((n) => n.moduleId === moduleId)?.moduleTitle || "MODULE"; return `<div class="module-group" style="left:${bounds.x}px;top:${bounds.y}px;width:${bounds.width}px;height:${bounds.height}px"><span class="module-label">${esc(title)}</span></div>`; }).join("");
     const edges = `<svg class="edge-layer" viewBox="0 0 1800 1100" preserveAspectRatio="none">${project.graph.edges.map((edge) => { const a = project.graph.nodes.find((n) => n.id === edge.from), b = project.graph.nodes.find((n) => n.id === edge.to); if (!a || !b) return ""; const x1 = a.x + 184, y1 = a.y + 39, x2 = b.x, y2 = b.y + 39, bend = Math.max(40, Math.abs(x2 - x1) * .45); return `<path class="edge ${edge.moduleId ? "module" : ""}" d="M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}"/>`; }).join("")}</svg>`;
@@ -683,18 +780,44 @@
     if (node.type === "regionMask") return `${project.representation.regions.length} region(s)<br>independent mask`;
     if (node.type === "regionEdit") return project.activeRegionId ? `active: ${esc(project.representation.regions.find((r) => r.id === project.activeRegionId)?.name || "region")}` : "select or create region";
     if (node.type === "ofat") return `${esc(node.settings.variable?.split(".").pop() || "variable")}<br>${esc(node.settings.values || "")}`;
-    if (node.type === "generator") { const selection = effectiveSelection(project, "generation", node.id); return `<div class="node-metric"><span>Provider</span><strong>${providerName(selection?.providerId)}</strong></div><div class="node-metric"><span>Model</span><strong>${esc(modelName(selection?.modelId))}</strong></div><div class="node-flow-line"><i></i></div>`; }
-    if (["representation", "compiler"].includes(node.type)) { ensureOutputState(project.representation); const output = project.representation.global.output; const rep = representationPresetById[output.representationPreset.value]; const style = designStylePresetById[output.designStylePreset.value]; return `<div class="node-metric"><span>표현</span><strong>${esc(rep?.nameKo || rep?.name || "—")}</strong></div><div class="node-metric"><span>스타일</span><strong>${esc(style?.nameKo || style?.name || "—")}</strong></div><div class="node-metric"><span>결과</span><strong>${project.experiments.length}</strong></div>`; }
-    if (node.type === "imageInput") return project.sourceImage ? "source attached" : "no image · mock ready";
+    if (["generator", "generate"].includes(node.type)) { const selection = effectiveSelection(project, "generation", node.id); return `<div class="node-metric"><span>실행 제공자</span><strong>${providerName(selection?.providerId)}</strong></div><div class="node-metric"><span>모델</span><strong>${esc(modelName(selection?.modelId))}</strong></div><div class="node-flow-line"><i></i></div>`; }
+    if (["representation", "compiler", "compile"].includes(node.type)) { ensureOutputState(project.representation); const output = project.representation.global.output; const rep = representationPresetById[output.representationPreset.value]; const styleValue = output.designStylePreset.value; const style = typeof styleValue === "string" ? designStylePresetById[styleValue] : null; return `<div class="node-metric"><span>표현</span><strong>${esc(rep?.nameKo || rep?.name || "—")}</strong></div><div class="node-metric"><span>스타일</span><strong>${esc(style?.nameKo || style?.name || (styleValue?.kind === "style-mix" ? "명시적 스타일 믹스" : "—"))}</strong></div><div class="node-metric"><span>결과</span><strong>${project.experiments.length}</strong></div>`; }
+    if (["imageInput", "image"].includes(node.type)) return project.sourceImage ? "source attached" : "no image · mock ready";
+    if (node.type === "iterate") return `<div class="node-metric"><span>SERIES</span><strong>${project.graphEvaluation?.variantCount || 0} variants</strong></div><div class="node-flow-line"><i></i></div>`;
     return `${NODE_DEFS[node.type]?.inputs.length || 0} in · ${NODE_DEFS[node.type]?.outputs.length || 0} out`;
   }
 
   function selectedNode(project) { return project.graph.nodes.find((node) => node.id === project.selectedNodeId) || null; }
 
+  function renderGraphInspector(project, node) {
+    const definition = globalThis.VRL_GRAPH.getNodeDef(node.type);
+    if (node.kind === "parameter") {
+      const semanticPath = node.settings.semanticPath || "일반 그래프 값";
+      const displayValue = Array.isArray(node.settings.value) ? `[${node.settings.value.join(", ")}]` : node.settings.value;
+      return `<div class="panel-section graph-inspector"><h3>그래프 소스</h3><div class="provenance-value"><b>${esc(displayValue)}</b><span>${esc(node.settings.unit || "")}</span></div><div class="execution-row"><span>의미 경로</span><b>${esc(semanticPath)}</b></div><div class="execution-row"><span>출처</span><b>${esc(node.settings.sourceType || "user")}</b></div><p class="mono">일반 편집은 그래프 노드에서 직접 수행합니다.</p></div>`;
+    }
+    const incoming = project.graph.edges.map(globalThis.VRL_GRAPH.normalizedEdge);
+    const rows = globalThis.VRL_GRAPH.getPorts(node, "inputs").map((input) => {
+      const edge = incoming.find((candidate) => candidate.target.nodeId === node.id && candidate.target.portId === input.id);
+      const source = edge ? project.graph.nodes.find((candidate) => candidate.id === edge.source.nodeId) : null;
+      const provenancePath = Object.entries(project.graphEvaluation?.provenance || {}).find(([, value]) => value.sourceNodeId === source?.id)?.[0];
+      return `<div class="graph-input-row" data-source-node-id="${source?.id || ""}"><div><span>${esc(input.label)}</span><small>${esc(input.type)}</small></div><b>${source ? `← ${esc(source.label)}` : `DEFAULT ${esc(input.default ?? "—")}`}</b>${provenancePath ? `<small>${esc(provenancePath)}</small>` : ""}</div>`;
+    }).join("");
+    const compiled = node.type === "compile" ? `<details><summary>컴파일 지시 보기</summary><pre class="json">${esc(project.graphEvaluation?.compiledInstruction?.prompt || compileGlobal(project.representation).prompt)}</pre></details>` : "";
+    const execution = node.type === "generate" ? renderGeneratorInspector(project, node) : "";
+    return `<div class="panel-section graph-inspector"><h3>CURRENT INPUT</h3>${rows || `<div class="empty">입력 포트 없음</div>`}<p class="mono">연결된 input이 component default보다 우선합니다. 의미 값은 이 Inspector에서 복제 편집하지 않습니다.</p>${compiled}</div>${execution}`;
+  }
+
   function renderInspector(project) {
     const node = selectedNode(project);
     if (!node) return `<div class="panel-head"><div class="eyebrow">CONTEXT INSPECTOR</div><h2 class="inspector-title">현재 작업을 선택하세요.</h2></div><div class="panel-section">${renderProjectSummary(project)}</div>`;
     const def = NODE_DEFS[node.type] || { category: "Custom", inputs: [], outputs: [] };
+    if (project.graph?.version === 2 && globalThis.VRL_GRAPH && node.kind !== "cluster") {
+      const graphBody = renderGraphInspector(project, node);
+      const graphDef = globalThis.VRL_GRAPH.getNodeDef(node.type);
+      return `<div class="panel-head"><div class="spread"><div><div class="eyebrow">GRAPH PROVENANCE</div><h2 class="inspector-title">${esc(node.label)}</h2><div class="inspector-type">${esc(graphDef.category)} · ${node.id.slice(-6)}</div></div><button class="text-action danger-text" data-delete-node="${node.id}">삭제</button></div></div>${graphBody}<div class="panel-section"><h3>PORT CONTRACT</h3><div class="port-contract"><b>입력</b><span>${graphDef.inputs.length ? graphDef.inputs.map((port) => `${esc(port.label)} · ${port.type}`).join("<br>") : "없음"}</span><hr class="divider"><b>출력</b><span>${graphDef.outputs.map((port) => `${esc(port.label)} · ${port.type}`).join("<br>")}</span></div></div>${project.debug ? `<div class="panel-section"><h3>평가 디버그</h3><pre class="json">${esc(JSON.stringify({ node, evaluation: project.graphEvaluation }, null, 2))}</pre></div>` : ""}`;
+    }
+    if (node.kind === "cluster") return `<div class="panel-head"><div class="eyebrow">CLUSTER / SUBGRAPH</div><h2 class="inspector-title">${esc(node.label)}</h2></div><div class="panel-section"><p>LIST → ITERATE → CAMERA OVERRIDE → GENERATE → COMPARE</p><button class="btn secondary" data-action="open-cluster" data-cluster-id="${node.id}">내부 그래프 열기</button></div>`;
     let body = "";
     if (node.type === "camera") body = renderCameraInspector(project, node);
     else if (node.type === "lighting") body = renderLightingInspector(project, node);
@@ -829,6 +952,22 @@
   }
 
   function addNode(project, type, position = null) {
+    if (project.graph?.version === 2 && globalThis.VRL_GRAPH) {
+      const parameterDefaults = {
+        number: { valueType: "Number", value: 0, min: 0, max: 100, step: 1, label: "숫자" },
+        text: { valueType: "String", value: "", label: "텍스트" },
+        boolean: { valueType: "Boolean", value: true, label: "불리언" },
+        enum: { valueType: "Enum", value: "none", options: ["none"], label: "열거값" },
+        image: { valueType: "Image", value: project.sourceImage, label: "이미지 소스" },
+        reference: { valueType: "Reference", value: project.referenceImages, label: "레퍼런스" },
+        list: { valueType: "List", itemType: "Number", value: [24, 35, 50, 85], label: "리스트" },
+      };
+      const settings = parameterDefaults[type] || { label: globalThis.VRL_GRAPH.getNodeDef(type).label };
+      const node = parameterDefaults[type]
+        ? globalThis.VRL_GRAPH.addParameterNode(project.graph, settings, position || { x: 160 + (project.graph.nodes.length % 5) * 228, y: 180 + Math.floor(project.graph.nodes.length / 5) * 170 })
+        : globalThis.VRL_GRAPH.addNode(project.graph, type, settings, position || { x: 160 + (project.graph.nodes.length % 5) * 228, y: 180 + Math.floor(project.graph.nodes.length / 5) * 170 });
+      project.selectedNodeId = node.id; syncGraphState(project); save("typed node를 추가했습니다."); renderWorkspace(); return;
+    }
     const count = project.graph.nodes.length;
     const node = { id: uid("node"), type, label: NODE_DEFS[type].label, x: position?.x ?? 160 + (count % 5) * 218, y: position?.y ?? 160 + Math.floor(count / 5) * 140, moduleId: null, settings: defaultNodeSettings(type) };
     project.graph.nodes.push(node); project.selectedNodeId = node.id; save("노드를 추가했습니다."); renderWorkspace();
@@ -836,6 +975,11 @@
 
   function addModule(project, moduleId, custom = null) {
     const definition = custom || moduleConfigs[moduleId]; if (!definition) return;
+    if (project.graph?.version === 2 && !custom && ["camera-study", "lighting-study"].includes(moduleId)) {
+      const cluster = globalThis.VRL_GRAPH.createClusterInstance(moduleId, project.representation, { x: 180 + (project.graph.nodes.length % 4) * 240, y: 520 });
+      cluster.order = project.graph.nodes.length; project.graph.nodes.push(cluster); project.selectedNodeId = cluster.id;
+      save(`${definition.title} 클러스터를 기존 그래프에 삽입했습니다.`); renderWorkspace(); return;
+    }
     const instanceId = uid("module");
     if (custom) {
       const idMap = {};
@@ -890,11 +1034,13 @@
     appEl.querySelectorAll("[data-test-provider]").forEach((button) => button.addEventListener("click", async () => { button.disabled = true; button.textContent = "확인 중…"; try { const response = await fetch("/api/ai/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providerId: button.dataset.testProvider }) }); const payload = await response.json(); providerStatuses[button.dataset.testProvider] = payload.status || (response.ok ? "connected" : "unavailable"); toast(payload.message || "연결 상태를 확인했습니다."); } catch { providerStatuses[button.dataset.testProvider] = "unavailable"; toast("로컬 AI 서버에 연결할 수 없습니다."); } renderWorkspace(); }));
     appEl.querySelector('[data-action="save-ai-routing"]')?.addEventListener("click", () => { const parse = (value) => { if (!value) return null; const [providerId, ...rest] = value.split("/"); return { providerId, modelId: rest.join("/") }; }; aiSettings.generationModel = parse(appEl.querySelector("#globalGenerationModel")?.value); aiSettings.editModel = parse(appEl.querySelector("#globalEditModel")?.value); aiSettings.referenceModel = aiSettings.generationModel; aiSettings.mockExplicit = [aiSettings.generationModel, aiSettings.editModel].some((selection) => selection?.providerId === "mock"); project.engineSetupDismissed = true; save("기본 AI 라우팅을 저장했습니다."); renderWorkspace(); });
     appEl.querySelector("#useGlobalRouting")?.addEventListener("change", (event) => { ensureExecutionState(project).useGlobalDefaults = event.target.checked; save(); renderWorkspace(); });
-    appEl.querySelector('[data-action="run-study"]')?.addEventListener("click", () => { const study = activeStudy(project); const node = [...project.graph.nodes].reverse().find((item) => item.type === "ofat" && (study.path.includes("lighting") ? item.settings.variable.includes("lighting") : item.settings.variable.includes("camera"))) || project.graph.nodes.find((item) => item.type === "ofat"); if (node) { node.settings.variable = study.path; node.settings.values = study.values.join(", "); runOfat(project, node); } });
+    appEl.querySelector('[data-action="run-study"]')?.addEventListener("click", () => { if (project.graph?.version === 2) return generateNormal(project); const study = activeStudy(project); const node = [...project.graph.nodes].reverse().find((item) => item.type === "ofat" && (study.path.includes("lighting") ? item.settings.variable.includes("lighting") : item.settings.variable.includes("camera"))) || project.graph.nodes.find((item) => item.type === "ofat"); if (node) { node.settings.variable = study.path; node.settings.values = study.values.join(", "); runOfat(project, node); } });
     appEl.querySelectorAll('[data-action="generate"]').forEach((button) => button.addEventListener("click", () => generateNormal(project)));
     appEl.querySelector('[data-action="clear-results-selection"]')?.addEventListener("click", () => { project.selectedExperimentIds = []; save(); renderWorkspace(); });
     appEl.querySelector('[data-action="add-default-node"]')?.addEventListener("click", () => addNode(project, "representation"));
     appEl.querySelector('[data-action="add-camera-module"]')?.addEventListener("click", () => addModule(project, "camera-study"));
+    appEl.querySelectorAll('[data-action="open-cluster"]').forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const cluster = project.graph.nodes.find((node) => node.id === button.dataset.clusterId); if (!cluster?.settings?.subgraph) return; project.graphStack ||= []; project.graphStack.push({ graph: project.graph, selectedNodeId: project.selectedNodeId }); project.graph = cluster.settings.subgraph; project.selectedNodeId = project.graph.nodes[0]?.id || null; renderWorkspace(); }));
+    appEl.querySelector('[data-action="close-cluster"]')?.addEventListener("click", () => { const parent = project.graphStack?.pop(); if (!parent) return; project.graph = parent.graph; project.selectedNodeId = parent.selectedNodeId; save("상위 그래프로 돌아왔습니다."); renderWorkspace(); });
     appEl.querySelectorAll("[data-add-node]").forEach((button) => button.addEventListener("click", () => addNode(project, button.dataset.addNode)));
     appEl.querySelectorAll("[data-add-module]").forEach((button) => button.addEventListener("click", () => addModule(project, button.dataset.addModule)));
     appEl.querySelectorAll("[data-add-custom]").forEach((button) => button.addEventListener("click", () => addModule(project, null, customModules.find((module) => module.id === button.dataset.addCustom))));
@@ -928,8 +1074,8 @@
     appEl.querySelectorAll(".node").forEach((element) => {
       const node = project.graph.nodes.find((item) => item.id === element.dataset.nodeId);
       const head = element.querySelector(".node-head"), checkbox = element.querySelector(".node-check");
-      checkbox.addEventListener("click", (event) => { event.stopPropagation(); const id = node.id; project.selectedNodeIds = checkbox.checked ? [...new Set([...project.selectedNodeIds, id])] : project.selectedNodeIds.filter((item) => item !== id); save(); renderWorkspace(); });
-      element.addEventListener("click", () => { project.selectedNodeId = node.id; save(); renderWorkspace(); });
+      checkbox?.addEventListener("click", (event) => { event.stopPropagation(); const id = node.id; project.selectedNodeIds = checkbox.checked ? [...new Set([...project.selectedNodeIds, id])] : project.selectedNodeIds.filter((item) => item !== id); save(); renderWorkspace(); });
+      element.addEventListener("click", (event) => { if (event.target.closest("input,select,button")) return; project.selectedNodeId = node.id; save(); renderWorkspace(); });
       head.addEventListener("pointerdown", (event) => {
         if (event.target.closest("input")) return;
         event.preventDefault(); event.stopPropagation();
@@ -941,12 +1087,42 @@
         head.addEventListener("pointermove", move); head.addEventListener("pointerup", up);
       });
     });
+    if (project.graph?.version !== 2 || !globalThis.VRL_GRAPH) return;
+    appEl.querySelectorAll("[data-parameter-editor]").forEach((input) => {
+      ["pointerdown", "click"].forEach((eventName) => input.addEventListener(eventName, (event) => event.stopPropagation()));
+      const update = () => {
+        const nodeId = input.dataset.parameterEditor;
+        const value = input.type === "checkbox" ? input.checked : input.value;
+        try { globalThis.VRL_GRAPH.setParameterValue(project.graph, nodeId, value); syncGraphState(project); save(); }
+        catch (error) { toast(error.message); }
+      };
+      const liveInput = ["range", "number", "text"].includes(input.type) && input.tagName !== "SELECT";
+      input.addEventListener(liveInput ? "input" : "change", () => { update(); if (liveInput) { if (["range", "number"].includes(input.type)) { const peerType = input.type === "range" ? "number" : "range"; const peer = appEl.querySelector(`input[type="${peerType}"][data-parameter-editor="${input.dataset.parameterEditor}"]`); if (peer) peer.value = input.value; } const editedNode = project.graph.nodes.find((candidate) => candidate.id === input.dataset.parameterEditor); if (editedNode?.type === "list") { const editor = input.closest(".list-editor"); const values = editedNode.settings.value || []; const count = editor?.querySelector("span"); const summary = editor?.querySelector("b"); if (count) count.textContent = `∷ ${values.length} ITEMS`; if (summary) summary.textContent = `[${values.join(", ")}] ${editedNode.settings.unit || ""}`; } refreshGraphSummaries(project); } else renderWorkspace(); });
+    });
+    appEl.querySelectorAll('[data-port-direction="output"]').forEach((port) => {
+      const begin = (event) => { event.preventDefault(); event.stopPropagation(); project.pendingGraphConnection = { fromNodeId: port.dataset.portNodeId, fromPortId: port.dataset.portId }; port.classList.add("pending"); };
+      port.addEventListener("pointerdown", begin); port.addEventListener("click", begin);
+    });
+    appEl.querySelectorAll('[data-port-direction="input"]').forEach((port) => {
+      const complete = (event) => {
+        event.preventDefault(); event.stopPropagation(); const pending = project.pendingGraphConnection; if (!pending) return;
+        const draft = { ...pending, toNodeId: port.dataset.portNodeId, toPortId: port.dataset.portId };
+        try { globalThis.VRL_GRAPH.connect(project.graph, draft); syncGraphState(project); toast("연결했습니다."); }
+        catch (error) {
+          if (error.code === "INPUT_OCCUPIED" && confirm(`${error.message}\n\n기존 연결을 교체할까요?\n혼합이 필요하면 취소 후 STYLE MIX를 삽입하세요.`)) {
+            globalThis.VRL_GRAPH.connect(project.graph, draft, { mode: "replace" }); syncGraphState(project); toast("기존 연결을 교체했습니다.");
+          } else toast(error.message);
+        }
+        project.pendingGraphConnection = null; save(); renderWorkspace();
+      };
+      port.addEventListener("pointerup", complete); port.addEventListener("click", complete);
+    });
   }
 
   function bindInspector(project) {
     const node = selectedNode(project); if (!node) return;
     appEl.querySelector("[data-delete-node]")?.addEventListener("click", () => {
-      const id = node.id; project.graph.nodes = project.graph.nodes.filter((item) => item.id !== id); project.graph.edges = project.graph.edges.filter((edge) => edge.from !== id && edge.to !== id); project.selectedNodeIds = project.selectedNodeIds.filter((item) => item !== id); project.selectedNodeId = project.graph.nodes[0]?.id || null; save("노드를 삭제했습니다."); renderWorkspace();
+      const id = node.id; if (project.graph?.version === 2) globalThis.VRL_GRAPH.removeNode(project.graph, id); else { project.graph.nodes = project.graph.nodes.filter((item) => item.id !== id); project.graph.edges = project.graph.edges.filter((edge) => edge.from !== id && edge.to !== id); } project.selectedNodeIds = project.selectedNodeIds.filter((item) => item !== id); project.selectedNodeId = project.graph.nodes[0]?.id || null; if (project.graph?.version === 2) syncGraphState(project); save("노드를 삭제했습니다."); renderWorkspace();
     });
     appEl.querySelectorAll("[data-mode-path]").forEach((button) => button.addEventListener("click", () => { const attribute = pathGet(project.representation, button.dataset.modePath); attribute.mode = button.dataset.mode; attribute.source = "user"; save(); renderWorkspace(); }));
     appEl.querySelectorAll("[data-attr-path]").forEach((input) => input.addEventListener(input.type === "range" ? "input" : "change", () => {
@@ -961,7 +1137,7 @@
   }
 
   function refreshGraphSummaries(project) {
-    appEl.querySelectorAll(".node").forEach((element) => { const node = project.graph.nodes.find((item) => item.id === element.dataset.nodeId); const body = element.querySelector(".node-body"); if (node && body) body.innerHTML = nodeSummary(project, node); });
+    appEl.querySelectorAll(".node").forEach((element) => { const node = project.graph.nodes.find((item) => item.id === element.dataset.nodeId); const body = element.querySelector(".node-body"); if (node && body && !(project.graph?.version === 2 && node.kind === "parameter")) body.innerHTML = nodeSummary(project, node); });
   }
 
   function bindNodeSpecificInspector(project, node) {
@@ -977,8 +1153,8 @@
     if (node.type === "regionEdit") bindRegionEdit(project);
     if (node.type === "ofat") bindOfat(project, node);
     if (node.type === "altBuilder") bindAlt(project, node);
-    if (["representation", "compiler"].includes(node.type)) bindOutputPresets(project);
-    if (node.type === "generator") bindGeneratorInspector(project, node);
+    if (project.graph?.version !== 2 && ["representation", "compiler"].includes(node.type)) bindOutputPresets(project);
+    if (["generator", "generate"].includes(node.type)) bindGeneratorInspector(project, node);
     appEl.querySelector('[data-action="generate-region"]')?.addEventListener("click", () => generateRegion(project));
   }
 
@@ -1080,6 +1256,19 @@
     try {
       resolveExecution(project, null, false); updateGenerationStage("COMPILING REPRESENTATION", "표현 상태를 모델 지시로 변환 중");
       const parent = project.experiments[0]?.id || null;
+      if (project.graph?.version === 2) {
+        const evaluation = evaluateProjectGraph(project);
+        if (!evaluation?.variants.length) throw new globalThis.VRL_GRAPH.GraphError("MISSING_GENERATION_PLAN", "GENERATE에 필요한 그래프 입력을 연결하세요.", { diagnostics: evaluation?.diagnostics || [] });
+        const created = [];
+        for (let index = 0; index < evaluation.variants.length; index += 1) {
+          const variant = evaluation.variants[index];
+          const variantEvaluation = { representationState: variant.representationState, compiledInstruction: variant.compiledInstruction, provenance: variant.provenance, generatorNodeId: evaluation.generatorNodeId };
+          const changed = parent ? diffRepresentations(project.experiments[0].representationState, variant.representationState) : [];
+          const suffix = changed[0] ? `${changed[0].path.split(".").pop()} ${changed[0].after?.value}` : `${index + 1}`;
+          created.push(await createExperiment(project, variant.representationState, evaluation.variants.length > 1 ? `ITERATE · ${suffix}` : project.experiments.length ? `Iteration ${project.experiments.length}` : "Baseline", parent, null, true, variantEvaluation));
+        }
+        project.experiments.unshift(...created.reverse()); project.selectedExperimentIds = evaluation.variants.length > 1 ? created.slice(0, 2).map((item) => item.id) : [created[0].id, ...project.selectedExperimentIds].slice(0, 2); generationRuntime.stage = null; save(evaluation.variants.length > 1 ? `ITERATE ${evaluation.variants.length}개 snapshot을 저장했습니다.` : "Graph snapshot을 저장했습니다."); renderWorkspace(); return;
+      }
       const experiment = await createExperiment(project, project.representation, project.experiments.length ? `Iteration ${project.experiments.length}` : "Baseline", parent, null, true);
       project.experiments.unshift(experiment); project.selectedExperimentIds = [experiment.id, ...project.selectedExperimentIds].slice(0, 2); generationRuntime.stage = null; save("Generation snapshot을 저장했습니다."); renderWorkspace();
     } catch (error) { generationRuntime.stage = null; generationRuntime.error = { code: error.code || "UNKNOWN", message: error.message, details: error.details || null }; renderWorkspace(); }
@@ -1093,6 +1282,7 @@
     } catch (error) { generationRuntime.stage = null; generationRuntime.error = { code: error.code || "UNKNOWN", message: error.message, details: error.details || null }; renderWorkspace(); }
   }
   async function runOfat(project, node) {
+    if (project.graph?.version === 2) return generateNormal(project);
     const path = node.settings.variable, rawValues = node.settings.values.split(",").map((value) => value.trim()).filter(Boolean), base = clone(project.representation), baseAttr = pathGet(base, path);
     const values = rawValues.map((value) => typeof baseAttr.value === "number" ? Number(value) : value).filter((value) => typeof value !== "number" || Number.isFinite(value)); if (!values.length) return;
     const created = [];
@@ -1119,7 +1309,7 @@
       project.selectedExperimentIds = project.selectedExperimentIds.includes(id) ? project.selectedExperimentIds.filter((item) => item !== id) : [...project.selectedExperimentIds.slice(-1), id];
       save(); renderWorkspace();
     }));
-    appEl.querySelectorAll("[data-load-experiment]").forEach((button) => button.addEventListener("click", () => { const experiment = project.experiments.find((item) => item.id === button.dataset.loadExperiment); if (!experiment) return; project.representation = ensureOutputState(clone(experiment.representationState)); save("스냅샷 상태를 작업 상태로 불러왔습니다."); renderWorkspace(); }));
+    appEl.querySelectorAll("[data-load-experiment]").forEach((button) => button.addEventListener("click", () => { const experiment = project.experiments.find((item) => item.id === button.dataset.loadExperiment); if (!experiment) return; if (experiment.graphSnapshot?.version === 2) { project.graph = clone(experiment.graphSnapshot); project.graphStack = []; project.representation = ensureOutputState(clone(experiment.representationState)); syncGraphState(project); project.workspaceMode = "system"; } else project.representation = ensureOutputState(clone(experiment.representationState)); save("그래프 스냅샷을 작업 상태로 불러왔습니다."); renderWorkspace(); }));
     appEl.querySelectorAll("[data-delete-experiment]").forEach((button) => button.addEventListener("click", () => { const id = button.dataset.deleteExperiment; project.experiments = project.experiments.filter((item) => item.id !== id); project.selectedExperimentIds = project.selectedExperimentIds.filter((item) => item !== id); save("Snapshot을 삭제했습니다."); renderWorkspace(); }));
     appEl.querySelectorAll("[data-eval-id]").forEach((select) => select.addEventListener("change", () => { const experiment = project.experiments.find((item) => item.id === select.dataset.evalId); experiment.evaluation[select.dataset.evalKey] = Number(select.value); save(); }));
     appEl.querySelectorAll("[data-failure-id]").forEach((select) => select.addEventListener("change", () => { const experiment = project.experiments.find((item) => item.id === select.dataset.failureId); experiment.evaluation.failureCause = select.value === "Failure cause…" ? "" : select.value; save(); }));
@@ -1132,6 +1322,18 @@
     blankRegion, createExperiment, clone, ensureOutputState, applyOutputPreset,
     compileOutput, mergeExclusions, REPRESENTATION_PRESETS, DESIGN_STYLE_PRESETS,
     ensureExecutionState, routingCapability, resolveExecution,
+    evaluateProjectGraph, syncGraphState,
+    evaluateGraph: (graph) => globalThis.VRL_GRAPH.evaluateGraph(graph, { compile: compileGlobal }),
+    connectGraph: (graph, draft, options) => globalThis.VRL_GRAPH.connect(graph, draft, options),
+    disconnectGraph: (graph, criteria) => globalThis.VRL_GRAPH.disconnect(graph, criteria),
+    setParameterValue: (graph, nodeId, value) => globalThis.VRL_GRAPH.setParameterValue(graph, nodeId, value),
+    addParameterNode: (graph, settings, position) => globalThis.VRL_GRAPH.addParameterNode(graph, settings, position),
+    addGraphNode: (graph, type, settings, position) => globalThis.VRL_GRAPH.addNode(graph, type, settings, position),
+    removeGraphNode: (graph, nodeId) => globalThis.VRL_GRAPH.removeNode(graph, nodeId),
+    runIterate: (project, iterateNodeId) => globalThis.VRL_GRAPH.runIterate(project, iterateNodeId, { compile: compileGlobal }),
+    createClusterInstance: globalThis.VRL_GRAPH.createClusterInstance,
+    validateGraph: globalThis.VRL_GRAPH.validateGraph,
+    COMPONENT_DEFAULTS: globalThis.VRL_GRAPH.COMPONENT_DEFAULTS,
   };
   load();
   render();

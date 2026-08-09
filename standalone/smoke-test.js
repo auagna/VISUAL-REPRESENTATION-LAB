@@ -14,6 +14,7 @@ global.confirm = () => true;
 global.prompt = () => "Test Module";
 
 require("./provider-runtime.js");
+require("./graph-runtime.js");
 require("./app.js");
 const vrl = global.__VRL_TEST__;
 
