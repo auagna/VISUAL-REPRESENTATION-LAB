@@ -791,6 +791,10 @@
 
   function renderGraphInspector(project, node) {
     const definition = globalThis.VRL_GRAPH.getNodeDef(node.type);
+    if (["imageInput", "image"].includes(node.type)) {
+      const semanticPath = node.settings.semanticPath || "asset.sourceImage";
+      return `${renderImageInputInspector(project)}<div class="panel-section graph-inspector"><h3>그래프 소스</h3><div class="execution-row"><span>의미 경로</span><b>${esc(semanticPath)}</b></div><div class="execution-row"><span>출처</span><b>${esc(node.settings.sourceType || "user")}</b></div><p class="mono">이미지 파일은 이 소스 노드에 연결되며 Representation State와 분리해 저장됩니다.</p></div>`;
+    }
     if (node.kind === "parameter") {
       const semanticPath = node.settings.semanticPath || "일반 그래프 값";
       const displayValue = Array.isArray(node.settings.value) ? `[${node.settings.value.join(", ")}]` : node.settings.value;
@@ -880,7 +884,7 @@
   }
 
   function renderImageInputInspector(project) {
-    return `<div class="panel-section"><h3>소스 이미지</h3><input class="field" type="file" accept="image/*" id="sourceImageInput">${project.sourceImage ? `<img src="${project.sourceImage}" alt="소스 인테리어" style="width:100%;max-height:220px;object-fit:contain;margin-top:8px;border:1px solid var(--line)"><button class="btn danger small" data-action="clear-source" style="margin-top:7px">이미지 제거</button>` : `<div class="empty" style="margin-top:8px">이미지가 없어도 모의 모드는 작동합니다.</div>`}<p class="mono">소스 이미지는 표현 상태와 별도로 저장됩니다.</p></div>`;
+    return `<div class="panel-section"><h3>소스 이미지</h3><label class="label" for="sourceImageInput">이미지 파일</label><input class="field" type="file" accept="image/*" id="sourceImageInput" aria-label="소스 이미지 선택">${project.sourceImage ? `<img src="${project.sourceImage}" alt="소스 인테리어" style="width:100%;max-height:220px;object-fit:contain;margin-top:8px;border:1px solid var(--line)"><button class="btn danger small" data-action="clear-source" style="margin-top:7px">이미지 제거</button>` : `<div class="empty" style="margin-top:8px">JPG, PNG, WEBP 등 이미지 파일을 선택하세요.</div>`}<p class="mono">소스 이미지는 표현 상태와 별도로 저장됩니다.</p></div>`;
   }
 
   function renderReferenceInspector(project, node) {
@@ -1333,6 +1337,7 @@
     runIterate: (project, iterateNodeId) => globalThis.VRL_GRAPH.runIterate(project, iterateNodeId, { compile: compileGlobal }),
     createClusterInstance: globalThis.VRL_GRAPH.createClusterInstance,
     validateGraph: globalThis.VRL_GRAPH.validateGraph,
+    renderInspector,
     COMPONENT_DEFAULTS: globalThis.VRL_GRAPH.COMPONENT_DEFAULTS,
   };
   load();
